@@ -69,6 +69,7 @@
           "/__VEHICLE_ID__/control/command/control_cmd",
           "/__VEHICLE_ID__/localization/kinematic_state",
           "/__VEHICLE_ID__/planning/scenario_planning/trajectory",
+          "/__VEHICLE_ID__/v2x/vehicle_positions/markers",
           "/__VEHICLE_ID__/racing_kart/debug/status",
           "/__VEHICLE_ID__/tf",
           "/__VEHICLE_ID__/tf_static",

@@ -105,6 +105,18 @@ RViz は GUI からでも `make rviz` 経由で Docker で起動します。
 車両を追加するとき、zenoh の許可リストを変えるときは、必ず両方のリポジトリを揃えてください。
 CI で突き合わせる仕組みを入れる予定です（未実装）。
 
+### 本体との既知の差分
+
+`shared/zenoh-user.json5.template` の `allow.subscribers` に
+`/__VEHICLE_ID__/v2x/vehicle_positions/markers` を足しています。本体側にはまだ入って
+いません（[PR #285](https://github.com/AutomotiveAIChallenge/aichallenge-racingkart/pull/285)
+は車両側 `vehicle/zenoh.json5` の publish 許可だけを追加していて、遠隔側の subscribe
+許可が漏れています）。この1行が無いと、車両が V2X マーカーを送っても遠隔側のブリッジが
+中継せず、RViz に他車が映りません。
+
+突き合わせ CI を作るときは、この行を既知の差分として扱ってください。本体側が修正されたら
+差分は解消されます。
+
 `rviz/map/` と `rviz/description/` も本体からの複製ですが、コース形状と車体形状なので
 更新頻度は低いものです。
 
