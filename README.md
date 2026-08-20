@@ -86,6 +86,7 @@ RViz は GUI からでも `make rviz` 経由で Docker で起動します。
 | ディレクトリ | 中身 |
 |---|---|
 | `manager/` | 遠隔操作ロジック。`racing_kart_manager_core.py` は ROS 非依存で、`tests/` は ROS を起動せず pytest だけで走ります |
+| `docs/` | 仕様。`docs/spec/joy-routing.md` が manager の正本です |
 | `scripts/` | 起動・接続スクリプト（zenoh、joy、manager、RViz） |
 | `shared/` | **本体リポジトリからの複製。同期が必要**（下記） |
 | `rviz/` | 遠隔監視 RViz 用のアセット（地図、車体モデル、rviz 設定、launch、プラグイン） |
