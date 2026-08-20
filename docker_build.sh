@@ -1,8 +1,10 @@
 #!/bin/bash
 # 本体リポジトリ (aichallenge-racingkart) の docker_build.sh と同じ作法で使う。
 #
-#   ./docker_build.sh remote   遠隔操作イメージ
 #   ./docker_build.sh rviz     遠隔監視イメージ
+#
+# ビルドするイメージは RViz 用の1つだけ。zenoh ブリッジ・joy・manager・操作GUI は
+# ホストで動かすのでイメージは要らない (make remote)。
 
 set -euo pipefail
 
@@ -10,7 +12,7 @@ target="${1-}"
 shift || true
 
 if [ -z "${target}" ]; then
-    echo "Usage: ./docker_build.sh <remote|rviz>" >&2
+    echo "Usage: ./docker_build.sh rviz" >&2
     exit 2
 fi
 
@@ -26,28 +28,24 @@ while [ $# -gt 0 ]; do
         ;;
     *)
         echo "invalid argument: '$1'" >&2
-        echo "Usage: ./docker_build.sh <remote|rviz>" >&2
+        echo "Usage: ./docker_build.sh rviz" >&2
         exit 2
         ;;
     esac
 done
 
 case "${target}" in
-"remote" | "rviz") ;;
+"rviz") ;;
 *)
-    echo "invalid argument (use 'remote' or 'rviz')" >&2
+    echo "invalid argument (use 'rviz')" >&2
     exit 1
     ;;
 esac
 
 opts="${NO_CACHE-}"
 
-# remote -> aichallenge-remote / rviz -> aichallenge-remote-rviz
-if [ "${target}" = "remote" ]; then
-    IMAGE_SUFFIX=""
-else
-    IMAGE_SUFFIX="-${target}"
-fi
+# rviz -> aichallenge-remote-rviz
+IMAGE_SUFFIX="-${target}"
 
 ts="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="output/docker/${ts}-docker_build-$$.log"
