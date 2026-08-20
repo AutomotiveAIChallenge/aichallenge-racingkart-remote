@@ -28,7 +28,6 @@ services:
       - HOST_UID=${HOST_UID:-}
       - HOST_GID=${HOST_GID:-}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
-      - LOG_DIR=${LOG_DIR:-}
     volumes:
       - ./output:${OUTPUT_ROOT:-/output}
       - ./scripts:/scripts

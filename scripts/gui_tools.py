@@ -6,7 +6,7 @@ import subprocess
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import tkinter.font as tkfont
 
@@ -18,7 +18,6 @@ ROOT_DIR = Path(__file__).resolve().parent
 REMOTE_DIR = ROOT_DIR
 
 DEFAULT_VEHICLE_ID = "A2"
-DEFAULT_USERNAME = ""  # Deprecated: SSH User input removed.
 
 
 # --- Devias Material Kit Pro: Chateau Green palette (approx) ---
@@ -240,23 +239,15 @@ class CommandSpec:
     command: str | None = None
     log_key: str | None = None
     requires_vehicle: bool = False
-    requires_username: bool = False
     stop_before: bool = False
     note: str | None = None
-    formatter: Optional[Callable[[str, str], str]] = None
     kind: str = "command"  # command, stop, stop_all
 
-    def render(self, vehicle_id: str, username: str) -> str:
+    def render(self, vehicle_id: str) -> str:
         if self.kind != "command":
             return ""
-        if self.formatter:
-            return self.formatter(vehicle_id, username)
-        values = {
-            "vehicle_id": vehicle_id,
-            "username": username,
-        }
         assert self.command is not None
-        return self.command.format(**values)
+        return self.command.format(vehicle_id=vehicle_id)
 
 COMMANDS: List[CommandSpec] = [
     CommandSpec(
@@ -360,7 +351,6 @@ class RemoteGui:
             raise SystemExit(1)
 
         self.vehicle_id_var = tk.StringVar(value=DEFAULT_VEHICLE_ID)
-        # SSH user was removed from UI; keep empty string for compatibility.
 
         self.processes: Dict[str, subprocess.Popen[str]] = {}
         self.process_threads: Dict[str, threading.Thread] = {}
@@ -381,7 +371,6 @@ class RemoteGui:
         vehicle_entry = ttk.Entry(top_frame, textvariable=self.vehicle_id_var, width=14)
         vehicle_entry.pack(side=tk.LEFT, padx=(6, 16))
 
-        # SSH User input removed per request.
 
         preview_frame = ttk.Frame(container, style="Card.TFrame")
         preview_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
@@ -468,13 +457,10 @@ class RemoteGui:
 
     def _handle_command(self, spec: CommandSpec) -> None:
         vehicle_id = self.vehicle_id_var.get().strip()
-        username = ""
 
         if spec.requires_vehicle and not vehicle_id:
             messagebox.showwarning("入力不足", "Vehicle ID を指定してください。")
             return
-
-        # SSH user requirement removed.
 
         if spec.kind == "stop":
             if not spec.log_key:
@@ -483,7 +469,7 @@ class RemoteGui:
             self._handle_stop_single(spec.log_key)
             return
 
-        command_text = spec.render(vehicle_id, username)
+        command_text = spec.render(vehicle_id)
         working_dir = REMOTE_DIR
         note = spec.note or ""
         self._update_preview(working_dir, command_text, note)

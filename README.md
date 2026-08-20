@@ -176,3 +176,8 @@ CI で突き合わせる仕組みを入れる予定です（未実装）。
 ## 未完了
 
 - [ ] `shared/` を本体と突き合わせる CI
+- [ ] RViz の速度計オーバーレイ（`rviz/plugin/`）が `rviz/config/remote.rviz` から使われていません。
+      Dockerfile は約26秒かけてビルドしています。`SignalDisplay` を足して使うか、プラグインごと消すか。
+- [ ] `/sensing/gnss/pose_with_covariance` は `remote.rviz` に表示設定があり `run_rviz.bash` が中継
+      していますが、zenoh の許可リストに無いため届きません。両リポジトリの許可リストに足して通すか、
+      表示と中継を消すか。
