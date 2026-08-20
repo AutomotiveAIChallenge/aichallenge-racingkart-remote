@@ -1,11 +1,10 @@
 #!/bin/bash
-# racing_kart_manager と操作 GUI の起動。
+# racing_kart_manager の起動。
 #
-#   manager.bash manager A2 A3 A7   # manager ノード（対象車両を指定）
-#   manager.bash gui                # 操作 GUI（対象車両は status から知る）
+#   manager.bash A2 A3 A7   # 対象車両を指定
 #
-# manager と GUI は別プロセス。GUI が落ちても manager は joy を流し続ける。
-# どちらもホストで動かす (make remote が run_remote.bash 経由で起動する)。
+# joy の中継・選択の GUI・レース通知を1つのプロセスで行う。ホストで動かす
+# (make remote が run_remote.bash 経由で起動する)。
 set -eo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -23,19 +22,10 @@ if ! python3 -c "import rclpy" 2>/dev/null; then
     exit 1
 fi
 
-cd "${SCRIPT_DIR}/../manager"
-
-case "${1:-manager}" in
-manager)
-    shift || true
-    exec python3 racing_kart_manager.py "$@"
-    ;;
-gui)
-    exec python3 racing_kart_manager_gui.py
-    ;;
-*)
-    echo "Usage: $0 manager <VEHICLE_ID> [VEHICLE_ID ...]" >&2
-    echo "       $0 gui" >&2
+if [ "$#" -eq 0 ]; then
+    echo "Usage: $0 <VEHICLE_ID> [VEHICLE_ID ...]" >&2
     exit 1
-    ;;
-esac
+fi
+
+cd "${SCRIPT_DIR}/../manager"
+exec python3 racing_kart_manager.py "$@"

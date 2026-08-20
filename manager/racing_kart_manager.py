@@ -1,55 +1,43 @@
 #!/usr/bin/env python3
-"""racing_kart_manager の ROS ノード。
+"""racing_kart_manager のエントリ。
 
-判断はすべて racing_kart_manager_core の純関数が行い、このファイルは
-「購読して、呼んで、publish する」だけの薄い層に徹する。
+joy の中継と選択の GUI を1つのプロセスで行う (REQ-01)。判断はすべて
+racing_kart_manager_core の純関数が行い、このファイルは「購読して、呼んで、publish
+する」だけの薄い層に徹する。
 
-依存するメッセージパッケージは sensor_msgs と std_msgs だけ。車両テレメトリは
-購読しない。
+スレッドは2つ。
+
+    メイン    Tk の mainloop、ボタン、100ms の再描画
+    ROS 実行  joy の受信・変換・publish
+
+守る約束は2つ。
+
+    1. Tk のウィジェットに触るのはメインスレッドだけ (Tkinter はスレッドセーフでない)
+    2. node.selection を書くのはメインスレッドだけ。ROS スレッドは読むだけ
 
 仕様: docs/spec/joy-routing.md
 """
 
 from __future__ import annotations
 
+import signal
+import sys
+import threading
+
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import (
-    QoSDurabilityPolicy,
-    QoSHistoryPolicy,
-    QoSProfile,
-    QoSReliabilityPolicy,
-)
 from sensor_msgs.msg import Joy
-from std_msgs.msg import String
 
 from racing_kart_manager_core import (
     INITIAL_SELECTION,
     JoyValue,
-    emergency_pressed,
-    parse_command,
     parse_vehicles,
-    select,
-    status_to_json,
     transform,
 )
+from racing_kart_manager_gui import ManagerWindow
 
-STATUS_PUBLISH_RATE_HZ = 5.0
-
-#: GUI を後から起動しても最新の選択が出るように transient_local にする
-STATUS_QOS = QoSProfile(
-    depth=1,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    reliability=QoSReliabilityPolicy.RELIABLE,
-    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-)
-
-#: 選択の切り替えを取りこぼさない
-COMMAND_QOS = QoSProfile(
-    depth=10,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    reliability=QoSReliabilityPolicy.RELIABLE,
-)
+#: ROS スレッドが抜けるのを待つ時間 (REQ-05)
+SHUTDOWN_TIMEOUT_S = 2.0
 
 
 def to_core_joy(msg: Joy) -> JoyValue:
@@ -74,79 +62,38 @@ class RacingKartManagerNode(Node):
     def __init__(self, vehicles: tuple[str, ...]) -> None:
         super().__init__("racing_kart_manager")
 
-        self._vehicles = vehicles
-        self._selection = INITIAL_SELECTION
+        self.vehicles = vehicles
 
-        self._joy: JoyValue | None = None
-        self._joy_at: float | None = None
+        #: GUI (メインスレッド) が書き、joy のコールバック (ROS スレッド) が読む。
+        #: 書き手が1つで、読み書きとも文字列1つの代入なのでロックは要らない。
+        self.selection = INITIAL_SELECTION
 
         self._joy_publishers = {
-            vehicle_id: self.create_publisher(
-                Joy, f"/{vehicle_id}/racing_kart/joy", 1
-            )
+            vehicle_id: self.create_publisher(Joy, f"/{vehicle_id}/racing_kart/joy", 1)
             for vehicle_id in vehicles
         }
 
         self.create_subscription(Joy, "/racing_kart/joy", self._on_joy, 1)
 
-        self._status_publisher = self.create_publisher(
-            String, "/racing_kart_manager/status", STATUS_QOS
-        )
-        self.create_subscription(
-            String, "/racing_kart_manager/command", self._on_command, COMMAND_QOS
-        )
-        self.create_timer(1.0 / STATUS_PUBLISH_RATE_HZ, self._publish_status)
-
         self.get_logger().info(f"racing_kart_manager started. vehicles={vehicles}")
 
-    def _now(self) -> float:
-        return self.get_clock().now().nanoseconds / 1e9
-
     def _on_joy(self, msg: Joy) -> None:
-        """joy 受信が唯一の publish 契機 (REQ-09)。
+        """joy 受信が唯一の publish 契機 (REQ-13)。
 
         タイマーで publish すると、ジョイスティックが死んでも車両には新鮮な joy が
         届き続け、車両側の5秒の生存チェーンが成立しなくなる。
         """
         value = to_core_joy(msg)
-        self._joy = value
-        self._joy_at = self._now()
 
-        for vehicle_id, outgoing in transform(
-            value, self._selection, self._vehicles
-        ).items():
+        # 冒頭で1回だけ読む。この1件を処理している間に選択が変わっても、
+        # 宛先とレース通知が食い違わない。
+        selection = self.selection
+
+        for vehicle_id, outgoing in transform(value, selection, self.vehicles).items():
             self._joy_publishers[vehicle_id].publish(to_ros_joy(outgoing))
-
-    def _on_command(self, msg: String) -> None:
-        target = parse_command(msg.data)
-        if target is None:
-            self.get_logger().warn(f"invalid command dropped: {msg.data!r}")
-            return
-
-        before = self._selection
-        self._selection = select(before, target, self._vehicles)
-        if self._selection != before:
-            self.get_logger().info(f"selection {before} -> {self._selection}")
-
-    def _publish_status(self) -> None:
-        """status だけはタイマーで出す。joy の送出経路ではないので生存チェーンに影響しない。"""
-        joy_age_s = None if self._joy_at is None else self._now() - self._joy_at
-        emergency = self._joy is not None and emergency_pressed(self._joy)
-
-        message = String()
-        message.data = status_to_json(
-            self._selection,
-            self._vehicles,
-            joy_age_s,
-            emergency,
-            self.get_clock().now().nanoseconds,
-        )
-        self._status_publisher.publish(message)
 
 
 def main() -> None:
-    import sys
-
     vehicles = parse_vehicles(sys.argv[1:])
     if vehicles is None:
         print(
@@ -157,15 +104,42 @@ def main() -> None:
         )
         raise SystemExit(1)
 
-    rclpy.init()
-    node = RacingKartManagerNode(vehicles)
+    # 起動のどこで失敗しても後始末が走るように、ここから finally の中に入れる。
+    # 途中で落ちたときに部品が半端に残ると、プロセスグループに死なないプロセスが
+    # 居座る。
+    node = None
+    spinner = None
     try:
-        rclpy.spin(node)  # 既定の SingleThreadedExecutor。到着順の処理を保証する
-    except KeyboardInterrupt:
-        pass
+        rclpy.init()
+        node = RacingKartManagerNode(vehicles)
+
+        # ROS は別スレッドで回す。GUI の描画や操作が joy の中継を止めないため (REQ-03)。
+        # rclpy.spin は単一スレッドの executor を使う。joy のコールバックが到着順に
+        # 直列で走ることに、レース通知の立ち上がり判定が依存している (REQ-04)。
+        spinner = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+        spinner.start()
+
+        # DISPLAY が無ければここで落ちる。画面のない運用は想定しない (REQ-02)。
+        window = ManagerWindow(node)
+
+        # rclpy.init() が SIGTERM を横取りするので、その後で上書きする。そのままだと
+        # make remote-stop の TERM で Tk の mainloop が抜けない。ハンドラは
+        # _refresh の after() で Python に戻る隙 (100ms ごと) に走る。
+        def on_terminate(signum, frame) -> None:  # noqa: ARG001
+            window.root.quit()
+
+        signal.signal(signal.SIGTERM, on_terminate)
+        signal.signal(signal.SIGINT, on_terminate)
+
+        window.run()
     finally:
-        node.destroy_node()
+        # shutdown → join → destroy の順 (REQ-05)。executor が保持しているノードを
+        # 別スレッドから壊さない。
         rclpy.try_shutdown()
+        if spinner is not None:
+            spinner.join(timeout=SHUTDOWN_TIMEOUT_S)
+        if node is not None:
+            node.destroy_node()
 
 
 if __name__ == "__main__":
