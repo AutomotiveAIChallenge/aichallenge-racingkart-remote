@@ -34,7 +34,11 @@ class ManagerWindow:
     def __init__(self, node) -> None:
         self.node = node
         self.root = tk.Tk()
-        self.root.title("racing_kart_manager")
+        title = "racing_kart_manager"
+        if node.brake_test is not None:
+            # 何%が仕込まれているかを走行前に目で確認できるようにする (§11)
+            title += f" (brake test {node.brake_test * 100:g}%)"
+        self.root.title(title)
         self.root.minsize(480, 96)
 
         frame = tk.Frame(self.root, padx=12, pady=12)
