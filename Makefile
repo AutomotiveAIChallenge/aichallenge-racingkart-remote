@@ -8,15 +8,11 @@ SHELL := /bin/bash
 HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
 export HOST_UID HOST_GID
-# ホストシェルの ROS_DOMAIN_ID が compose 補間で .env を上書きするのを防ぐ。
-# ただし `make foo ROS_DOMAIN_ID=N` の明示指定は通す。
+# ホストシェルの ROS_DOMAIN_ID が compose 補間や子プロセスに漏れるのを防ぐ。
+# 遠隔側は常に 0 で、run_zenoh.bash も 0 に固定している。変える口は用意しない。
 unexport ROS_DOMAIN_ID
-ifeq ($(origin ROS_DOMAIN_ID),command line)
-export ROS_DOMAIN_ID
-endif
 
 TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
-LOG_DIR := /output/$(TIMESTAMP)
 
 # 遠隔操作PC一式（zenoh ブリッジ + joy + manager）。GUI は manager と同じプロセス。
 #   make remote VEHICLES="A2 A3 A7"
