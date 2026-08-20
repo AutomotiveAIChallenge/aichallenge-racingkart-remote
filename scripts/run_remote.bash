@@ -70,7 +70,14 @@ start() {
 # 無いだけで害はない。
 start zenoh "${script_dir}/run_zenoh.bash" "${vehicles}" "${log_dir}"
 start joy "${script_dir}/joy.bash"
-start manager "${script_dir}/manager.bash" "${vehicle_list[@]}"
+# ブレーキ試験 (実験用)。環境変数ではなく引数で渡すのは、make ps に出て、走行前に
+# 何%が仕込まれているか目で確認できるため。
+manager_args=("${vehicle_list[@]}")
+if [ -n "${BRAKE_TEST-}" ]; then
+    manager_args+=(--brake-test "${BRAKE_TEST}")
+fi
+
+start manager "${script_dir}/manager.bash" "${manager_args[@]}"
 
 echo "[run_remote] up on ROS_DOMAIN_ID ${ROS_DOMAIN_ID}: ${vehicles}"
 

@@ -54,6 +54,7 @@ def parse_vehicles(args) -> Optional[tuple[str, ...]]:
 NUM_AXES = 8
 NUM_BUTTONS = 11
 
+AXIS_BRAKE = 2  # LeftTrigger
 AXIS_ACCEL = 5  # RightTrigger
 AXIS_DPAD_V = 7  # DpadVertical (ギア)
 
@@ -281,3 +282,58 @@ def race_payload(event: str, stamp_ns: int) -> str:
     """通知のペイロード。時刻は joy の header.stamp から作る (RN-09)。"""
     field = "started_at" if event == RACE_START else "finished_at"
     return json.dumps({field: to_jst_iso8601(stamp_ns)})
+
+
+# --------------------------------------------------------------------------
+# 実験用: ブレーキ試験
+#
+# 仕様: docs/spec/joy-routing.md §11
+# --------------------------------------------------------------------------
+
+#: 発火ボタン。driver も manager も使っていない唯一の空き。
+BUTTON_BRAKE_TEST = BUTTON_B
+
+
+def brake_axis_value(ratio: float) -> float:
+    """ブレーキ比率 (0.0-1.0) を軸の値にする。
+
+    driver は clamp((1.0 - axes[i]) / 2.0, 0, 1) で踏み込み量を作るので、その逆。
+    無操作が +1.0、全開が -1.0 になる。
+    """
+    return 1.0 - 2.0 * ratio
+
+
+def brake_test_engaged(
+    joy: JoyValue, selection: str, vehicles: tuple[str, ...], ratio: Optional[float]
+) -> bool:
+    """ブレーキ試験を効かせる条件が揃っているか (REQ-26)。
+
+    単車選択のときだけ効かせる。全台選択中に全車が同時に急制動するのは事故のもと。
+    壊れた入力では効かせない。要素数の違う joy はどの車両も操縦できない (REQ-18)。
+    """
+    if ratio is None:
+        return False
+    if selection not in vehicles:
+        return False
+    if not joy_is_well_formed(joy):
+        return False
+    return _pressed(joy, BUTTON_BRAKE_TEST)
+
+
+def with_brake_test(joy: JoyValue, ratio: float) -> JoyValue:
+    """ステアだけ自動 + 一定ブレーキ の joy にする (REQ-25)。
+
+    X を立てて車両側の control_mode を AUTONOMOUS_STEER_ONLY にする。そのモードでは
+    アクセルとブレーキが joy 側に移るので、ブレーキを指定値に、アクセルを無操作値にする。
+    アクセルを落とさないと、トリガーを踏んでいたときにブレーキと同時に入る。
+
+    緊急停止4ボタンと解除には触れない。
+    """
+    axes = list(joy.axes)
+    axes[AXIS_BRAKE] = brake_axis_value(ratio)
+    axes[AXIS_ACCEL] = NO_INPUT_AXES[AXIS_ACCEL]
+
+    buttons = list(joy.buttons)
+    buttons[BUTTON_X] = 1
+
+    return JoyValue(axes=tuple(axes), buttons=tuple(buttons), stamp_ns=joy.stamp_ns)
