@@ -3,8 +3,9 @@
 #
 #   run_remote.bash "A2 A3 A7" [LOG_DIR]
 #
-# 起動するのは zenoh ブリッジ・joy・manager・操作GUI の4つ。RViz だけは Autoware の
-# RViz プラグインと map_loader が要るのでコンテナのまま (make rviz)。
+# 起動するのは zenoh ブリッジ・joy・manager の3つ。manager は joy の中継と選択の GUI を
+# 1つのプロセスで行う。RViz だけは Autoware の RViz プラグインと
+# map_loader が要るのでコンテナのまま (make rviz)。
 #
 # make remote が setsid で起動するので、このスクリプトがセッションリーダーになり、
 # 子も孫も同じプロセスグループに入る。make remote-stop は `kill -TERM -<PID>` で
@@ -60,8 +61,7 @@ start() {
 # 無いだけで害はない。
 start zenoh "${script_dir}/run_zenoh.bash" "${vehicles}" "${log_dir}"
 start joy "${script_dir}/joy.bash"
-start manager "${script_dir}/manager.bash" manager "${vehicle_list[@]}"
-start manager-gui "${script_dir}/manager.bash" gui
+start manager "${script_dir}/manager.bash" "${vehicle_list[@]}"
 
 echo "[run_remote] up on ROS_DOMAIN_ID ${ROS_DOMAIN_ID}: ${vehicles}"
 
