@@ -6,12 +6,14 @@ ROS にも Tk にも依存しない。sensor_msgs/Joy との相互変換はノ�
 manager は joy の中継器である。判断に使うのは GUI で選んだ選択と、受信した joy の中身
 だけで、車両から届くテレメトリは購読しない。
 
-仕様: docs/spec/joy-routing.md
+仕様: docs/spec/joy-routing.md, docs/spec/race-notification.md
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 # --------------------------------------------------------------------------
@@ -150,6 +152,11 @@ def emergency_pressed(joy: JoyValue) -> bool:
     return any(_pressed(joy, index) for index in EMERGENCY_BUTTONS)
 
 
+def autonomous_pressed(joy: JoyValue) -> bool:
+    """自動運転 (Y) が押されているか。X は含めない (RN-04)。"""
+    return _pressed(joy, BUTTON_Y)
+
+
 def _with_emergency(joy: JoyValue) -> JoyValue:
     """緊急停止ボタン4つすべてを立てた joy。"""
     buttons = list(joy.buttons)
@@ -190,3 +197,87 @@ def transform(
         vehicle_id: (chosen if vehicle_id in targets else idle)
         for vehicle_id in vehicles
     }
+
+
+# --------------------------------------------------------------------------
+# レース通知
+#
+# 仕様: docs/spec/race-notification.md
+# --------------------------------------------------------------------------
+
+RACE_START = "start"
+RACE_FINISH = "finish"
+
+TOPIC_RACE_START = "kart_race_start"
+TOPIC_RACE_FINISH = "kart_race_finish"
+
+JST = timezone(timedelta(hours=9))
+
+
+@dataclass(frozen=True)
+class RaceTriggers:
+    """ある1つの joy から見た、2つの発火条件の成否。"""
+
+    start: bool
+    finish: bool
+
+
+def race_triggers(joy: JoyValue, selection: str) -> RaceTriggers:
+    """発火条件を評価する。条件は互いに独立に見る (RN-07)。
+
+    開始は transform が操縦を許す joy のときだけ見る (RN-10)。要素数が規定と違う入力は
+    どの車両も操縦できない (REQ-18) のに、ボタン配列の違う機器の index 3 が偶然立って
+    レース開始が飛び、retain された started_at を上書きする、というのを防ぐ。
+    終了は要素数を問わない。壊れていても止めるほうは通す。
+    """
+    return RaceTriggers(
+        start=(
+            joy_is_well_formed(joy)
+            and selection == SELECTION_ALL
+            and autonomous_pressed(joy)
+        ),
+        finish=emergency_pressed(joy),
+    )
+
+
+def race_events(
+    previous: Optional[RaceTriggers], current: RaceTriggers
+) -> tuple[str, ...]:
+    """立ち上がったものだけを返す (RN-05)。
+
+    joy_node は押下中も 20Hz で送り続けるため、押されているかどうかだけで判定すると
+    1回の押下で連続送信になる。
+
+    previous が None のときは何も返さない (RN-08)。ボタンを押したまま起動したときに、
+    押した覚えのない通知が飛ぶのを防ぐ。
+    """
+    if previous is None:
+        return ()
+
+    events = []
+    if current.start and not previous.start:
+        events.append(RACE_START)
+    if current.finish and not previous.finish:
+        events.append(RACE_FINISH)
+    return tuple(events)
+
+
+def race_topic(event: str) -> str:
+    return TOPIC_RACE_START if event == RACE_START else TOPIC_RACE_FINISH
+
+
+def to_jst_iso8601(stamp_ns: int) -> str:
+    """ナノ秒を JST の ISO 8601 にする。ミリ秒3桁、オフセットは +09:00 (RN-02, RN-03)。
+
+    秒とナノ秒に分けてから組み立てる。stamp_ns / 1e9 と割ってしまうと float の桁が
+    足りず、ミリ秒がずれることがある。
+    """
+    seconds, remainder = divmod(stamp_ns, 1_000_000_000)
+    moment = datetime.fromtimestamp(seconds, tz=JST)
+    return f"{moment.strftime('%Y-%m-%dT%H:%M:%S')}.{remainder // 1_000_000:03d}+09:00"
+
+
+def race_payload(event: str, stamp_ns: int) -> str:
+    """通知のペイロード。時刻は joy の header.stamp から作る (RN-09)。"""
+    field = "started_at" if event == RACE_START else "finished_at"
+    return json.dumps({field: to_jst_iso8601(stamp_ns)})

@@ -3,8 +3,8 @@
 #
 #   run_remote.bash "A2 A3 A7" [LOG_DIR]
 #
-# 起動するのは zenoh ブリッジ・joy・manager の3つ。manager は joy の中継と選択の GUI を
-# 1つのプロセスで行う。RViz だけは Autoware の RViz プラグインと
+# 起動するのは zenoh ブリッジ・joy・manager の3つ。manager は joy の中継・選択の GUI・
+# レース通知を1つのプロセスで行う。RViz だけは Autoware の RViz プラグインと
 # map_loader が要るのでコンテナのまま (make rviz)。
 #
 # make remote が setsid で起動するので、このスクリプトがセッションリーダーになり、
@@ -31,6 +31,15 @@ read -r -a vehicle_list <<<"${vehicles}"
 log_dir="${2-}"
 log_dir="${log_dir:-$(cd "${script_dir}/.." && pwd)/output/$(date +%Y%m%d-%H%M%S)}"
 out_dir="${log_dir}/remote"
+
+# .env を読む。MQTT の接続情報 (レース通知) と TLS_ROOT がここに入る。docker compose は
+# 自動で読むが、ホストで動く子には誰も渡さないのでここで読む。認証情報は .env にだけ置く。
+if [ -f "${script_dir}/../.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "${script_dir}/../.env"
+    set +a
+fi
 
 # ROS 環境。make から setsid で起動されるとログインシェルを通らないので自分で読む。
 # setup.bash は未定義変数を触るので set -u は使わない。
