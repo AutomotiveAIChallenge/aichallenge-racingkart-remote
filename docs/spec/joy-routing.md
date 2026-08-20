@@ -4,6 +4,7 @@
 
 - 実装: `manager/racing_kart_manager_core.py`（純ロジック）、`manager/racing_kart_manager.py`（ROS ノードと GUI）
 - テスト: `manager/tests/`（§10 の観点に対応する）
+- レース開始・終了の MQTT 通知: [`race-notification.md`](race-notification.md)
 
 ## 1. 役割
 
