@@ -1,0 +1,18 @@
+# zenoh mTLS material (distributed separately as a zip; never commit)
+tls/
+tls*.zip
+*tls*.zip
+*.pem
+*.key
+
+.env
+output/
+*.log
+*.pyc
+__pycache__/
+.coverage
+
+# AI related local notes (do not commit)
+.claude
+/CLAUDE.md
+/MEMORY.md
