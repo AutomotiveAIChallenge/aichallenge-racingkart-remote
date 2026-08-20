@@ -4,12 +4,10 @@ SHELL := /bin/bash
 
 .PHONY: remote remote-stop rviz rviz-stop down ps logs
 
-# compose がコンテナのユーザーに使う。output/ の生成物がホストユーザー所有になる。
+# RViz コンテナのユーザーに使う。output/ の生成物がホストユーザー所有になる。
 HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
-# joy_node が /dev/input/event* を非 root で読むのに要る。
-HOST_GID_INPUT ?= $(shell getent group input | cut -d: -f3)
-export HOST_UID HOST_GID HOST_GID_INPUT
+export HOST_UID HOST_GID
 # ホストシェルの ROS_DOMAIN_ID が compose 補間で .env を上書きするのを防ぐ。
 # ただし `make foo ROS_DOMAIN_ID=N` の明示指定は通す。
 unexport ROS_DOMAIN_ID
@@ -22,17 +20,21 @@ LOG_DIR := /output/$(TIMESTAMP)
 
 # 遠隔操作PC一式（zenoh ブリッジ + joy + manager + 操作GUI）
 #   make remote VEHICLES="A2 A3 A7"
-# 対象車両に既定値を置かない。使わない車両が UNKNOWN のまま残ると停止確認が取れず、
-# すべての操作が塞がるため。
+# 対象車両に既定値を置かない。GUI の「全台」も緊急停止の宛先もここで決まるため。
 # 遠隔側は常に ROS_DOMAIN_ID 0。車両側の domain とは無関係で、車両IDで区別する。
 #
-# zenoh ブリッジだけはコンテナに入れずホストで動かす。compose は network_mode: host
-# なので、ホストのブリッジとコンテナ側の manager は同じ ROS_DOMAIN_ID 0 で噛み合う。
-# setsid で端末から切り離すので make が返ってもブリッジは生き残る。
-# ホストに zenoh-bridge-ros2dds の deb が入っていること (README 参照)。
+# RViz 以外はコンテナに入れずホストで動かす。setsid で端末から切り離すので make が
+# 返っても生き残る。setsid によって run_remote.bash がセッションリーダーになり、
+# 子も孫も同じプロセスグループに入る。停止はそのグループごと畳む (remote-stop)。
+# ホストに ROS 2 Humble と zenoh-bridge-ros2dds が入っていること (README 参照)。
 remote:
 	@test -n "$(VEHICLES)" || { \
 		echo 'Error: VEHICLES を指定してください。  例: make remote VEHICLES="A2 A3 A7"' >&2; \
+		exit 1; \
+	}
+	@test -f /opt/ros/humble/setup.bash || { \
+		echo 'Error: ROS 2 Humble が見つかりません (/opt/ros/humble)。' >&2; \
+		echo '       sudo apt install ros-humble-ros-base ros-humble-joy python3-tk' >&2; \
 		exit 1; \
 	}
 	@command -v zenoh-bridge-ros2dds >/dev/null || { \
@@ -40,20 +42,39 @@ remote:
 		echo '       sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb' >&2; \
 		exit 1; \
 	}
-	@mkdir -p output
-	@setsid ./scripts/run_zenoh.bash "$(VEHICLES)" "$(PWD)/output/$(TIMESTAMP)" \
-		</dev/null >/dev/null 2>&1 & echo $$! > output/zenoh.pid
-	ROS_DOMAIN_ID=0 docker compose up -d joy manager manager-gui
+	@mkdir -p output/$(TIMESTAMP)/remote output/latest
+	@ln -sfn "$(PWD)/output/$(TIMESTAMP)/remote" output/latest/remote
+	@setsid ./scripts/run_remote.bash "$(VEHICLES)" "$(PWD)/output/$(TIMESTAMP)" \
+		</dev/null >/dev/null 2>&1 & echo $$! > output/remote.pid
 	@echo "対象車両: $(VEHICLES)"
-	@echo "zenoh: ホストで起動 (PID $$(cat output/zenoh.pid))"
-	@echo "ログ: output/$(TIMESTAMP)/remote/zenoh-<VEHICLE_ID>.log"
+	@echo "PID: $$(cat output/remote.pid) (zenoh / joy / manager / GUI)"
+	@echo "ログ: output/latest/remote/"
 	@echo "状態: make ps / ログ: make logs / 停止: make remote-stop"
 
+# プロセスグループごと畳む。PID の前のマイナスがそれ。`ros2 run` は joy_node を
+# subprocess で起こすので、親だけ kill すると joy_node が孤児として残る。
 remote-stop:
-	docker compose stop manager-gui manager joy
-	@# run_zenoh.bash は TERM を受けると子のブリッジを全部畳む
-	-@[ -f output/zenoh.pid ] && kill -TERM "$$(cat output/zenoh.pid)" 2>/dev/null; \
-		rm -f output/zenoh.pid
+	@pid=$$(cat output/remote.pid 2>/dev/null); \
+	if [ -z "$$pid" ]; then \
+		echo "output/remote.pid がありません。起動していないようです。"; \
+		exit 0; \
+	fi; \
+	echo "stopping PID group $$pid ..."; \
+	kill -TERM -"$$pid" 2>/dev/null || kill -TERM "$$pid" 2>/dev/null || true; \
+	for _ in $$(seq 20); do pgrep -g "$$pid" >/dev/null || break; sleep 0.25; done; \
+	if pgrep -g "$$pid" >/dev/null; then \
+		echo "TERM で終わらないプロセスがあるので KILL します:"; \
+		pgrep -g "$$pid" -a; \
+		kill -KILL -"$$pid" 2>/dev/null || true; \
+		sleep 1; \
+	fi; \
+	if pgrep -g "$$pid" >/dev/null; then \
+		echo "警告: まだ残っています。"; \
+		pgrep -g "$$pid" -a; \
+	else \
+		echo "停止しました。"; \
+	fi; \
+	rm -f output/remote.pid
 
 # 遠隔監視 RViz
 #   make rviz VEHICLE=A3
@@ -69,8 +90,17 @@ rviz-stop:
 down:
 	docker compose down --remove-orphans
 
+# ホスト側はプロセスグループの中身をそのまま出す。コンテナは RViz だけ。
 ps:
-	docker compose ps
+	@pid=$$(cat output/remote.pid 2>/dev/null); \
+	if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+		echo "remote: up (PID group $$pid)"; \
+		pgrep -g "$$pid" -a | sed 's/^/  /'; \
+	else \
+		echo "remote: down"; \
+	fi
+	@echo
+	@docker compose ps
 
 logs:
-	docker compose logs -f manager
+	tail -f output/latest/remote/manager.log

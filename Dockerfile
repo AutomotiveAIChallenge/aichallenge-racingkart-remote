@@ -1,33 +1,14 @@
-# 遠隔操作PC用イメージ。用途ごとにステージを分ける。
+# 遠隔監視 RViz 用イメージ。
 #
-#   ./docker_build.sh remote   遠隔操作（joy / manager / GUI）
-#   ./docker_build.sh rviz     遠隔監視（RViz）
+#   ./docker_build.sh rviz
 #
-# remote 側は Autoware を必要としない。rclpy + sensor_msgs + std_msgs だけで足りるため
-# ros:humble-ros-base を使う（Autoware ベースは 13.8GB）。
-# rviz 側は Autoware の RViz プラグインと map_loader を使うので Autoware ベースを使う。
+# コンテナに入れているのは RViz だけ。Autoware の RViz プラグインと map_loader を
+# 使うので Autoware ベースのままにしている。
 #
-# zenoh ブリッジはここに入れない。make remote がホストで scripts/run_zenoh.bash を
-# 叩くため。ホストへは vendor/ の deb を dpkg -i で入れる（README 参照）。
+# zenoh ブリッジ・joy・manager・操作GUI はホストで動かす（make remote）。
+# ホストには ROS 2 Humble（rclpy / sensor_msgs / std_msgs / joy / tkinter）と
+# vendor/ の zenoh-bridge-ros2dds deb を入れておくこと。README 参照。
 
-########################################
-# remote: 遠隔操作
-########################################
-FROM ros:humble-ros-base AS remote
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ros-humble-joy \
-      python3-tk \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY manager /manager
-COPY scripts /scripts
-COPY shared  /shared
-WORKDIR /scripts
-
-########################################
-# rviz: 遠隔監視
-########################################
 FROM ghcr.io/automotiveaichallenge/autoware-universe:humble-latest AS rviz
 
 # 車体モデルは ament_auto_package(INSTALL_TO_SHARE) と同じことを COPY で行う。
