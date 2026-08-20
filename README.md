@@ -56,8 +56,19 @@ zenoh ブリッジは車両1台につき1プロセスがホストで立ちます
 `output/<timestamp>/remote/zenoh-<VEHICLE_ID>.log` です。`make remote-stop` が TERM を
 送ると、`run_zenoh.bash` が子のブリッジを全部畳みます。
 
-対象車両に既定値はありません。使わない車両を渡すとその車の状態が UNKNOWN のまま残り、
-停止確認が取れずに全操作が塞がるためです。
+対象車両に既定値はありません。GUI の「全台」も緊急停止の宛先も、ここで渡した車両で決まります。
+
+### 操作モデル
+
+manager の仕様は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md) にあります。要点だけ:
+
+- GUI で「未選択 / 車両1台 / 全台」を選びます。選択中のボタンが赤くなります。
+- スティックが効くのは選択車だけです。非選択車には無操作の joy が届きます（送るのを止めると
+  車両側が5秒で緊急停止をラッチしてしまうため）。
+- **緊急停止ボタン（LB / RB / START / BACK）は選択に関係なく全台へ飛びます。**
+- 解除（左右スティックの押し込み同時押し）は選択に従います。全台まとめて戻すときは
+  全台選択にしてから解除してください。
+- manager は車両テレメトリを見ません。車両の状態は RViz で確認してください。
 
 遠隔側は常に `ROS_DOMAIN_ID=0` で動きます。車両側の domain とは無関係で、車両IDで区別します。
 全車両のトピックが `/<VEHICLE_ID>/...` の下にまとめて見えます。
@@ -138,13 +149,4 @@ RViz 側は Autoware の RViz プラグインと `map_loader` を使うので Au
 
 ## 未完了
 
-**manager はまだ起動できません。** 操作ブロックの仕組み（緊急停止・停止確認・control_mode の
-チェック）が `racing_kart_msgs` と `autoware_auto_vehicle_msgs` に依存していますが、
-遠隔操作イメージ（`ros:humble-ros-base`）にはこれらが入っていないためです。
-
-仕様変更でこれらのチェックを撤廃し、常に任意の車両を操作できるようにする予定です。
-それまで `make remote` は manager の起動に失敗します（zenoh と joy は動きます）。
-
-- [ ] 操作ブロックの撤廃（`Tri` / `BlockerCode` / `Blocker` / `stopped_of` / `emergency_of` / `control_mode_of` / `can_enter_*` の削除）
-- [ ] 上記に伴う `manager/tests/` の書き直し
 - [ ] `shared/` を本体と突き合わせる CI

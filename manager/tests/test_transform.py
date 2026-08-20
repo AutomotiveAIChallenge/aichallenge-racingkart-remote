@@ -1,223 +1,162 @@
-"""L1: transform のテスト (T-01 〜 T-10)。
+"""joy の送出とマスクのテスト (T-09 〜 T-15)。
 
-対応: docs/spec/multi-vehicle-start-stop-test.md 第6章
-ハザード: HZ-1 (無操作のつもりで踏んだ joy を送る), HZ-2, HZ-3
+仕様: docs/spec/joy-routing.md §4
+
+| 宛先     | axes       | LB/RB/START/BACK | LSB/RSB | A/B/X/Y |
+| -------- | ---------- | ---------------- | ------- | ------- |
+| 選択車   | 素通し     | 素通し           | 素通し  | 素通し  |
+| 非選択車 | 無操作値   | 素通し           | 0       | 0       |
+
+緊急停止の列は test_emergency.py で検証する。
 """
 
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
-from conftest import VEHICLES, JOY_FULL, JOY_NO_INPUT, NO_BUTTONS, joy_with_buttons
+from conftest import JOY_FULL, JOY_NO_INPUT, NO_BUTTONS, VEHICLES, joy_with_buttons
 from racing_kart_manager_core import (
-    AXIS_ACCEL,
-    AXIS_BRAKE,
-    AXIS_DPAD_H,
-    AXIS_DPAD_V,
-    AXIS_STEER,
-    EMERGENCY_BUTTONS,
+    BUTTON_A,
+    BUTTON_B,
+    BUTTON_LSB,
+    BUTTON_RSB,
+    BUTTON_X,
+    BUTTON_Y,
     NO_INPUT_AXES,
     NUM_AXES,
     NUM_BUTTONS,
+    SELECTION_ALL,
+    SELECTION_NONE,
     JoyValue,
-    TransformSpec,
     transform,
 )
 
-ALL_DESTS = frozenset(VEHICLES)
+
+# ==========================================================================
+# 送出の契機と宛先
+# ==========================================================================
 
 
-def spec(destinations, suppress=False, force=False) -> TransformSpec:
-    return TransformSpec(
-        destinations=frozenset(destinations),
-        suppress_axes=suppress,
-        force_emergency=force,
-    )
+@pytest.mark.parametrize("selection", [SELECTION_NONE, SELECTION_ALL, "A3"])
+def test_t09_publishes_to_every_target_vehicle(selection):
+    """T-09: joy 1つにつき、対象車両全部へ1つずつ送る (REQ-09)。
 
-
-# --------------------------------------------------------------------------
-# T-01 / T-02: 一斉モードの無操作値での上書き
-# --------------------------------------------------------------------------
-
-
-def test_t01_all_mode_overrides_axes_with_no_input():
-    """T-01: 全開 joy を入れても、4台向けの出力は全軸が無操作値になる。
-
-    アクセル・ブレーキの無操作は 0.0 ではなく +1.0。ここを取り違えると
-    アクセル50%・ブレーキ50%を踏んだ joy を4台へ送ることになる (HZ-1)。
+    宛先は選択で絞らない。絞ると、送らなくなった車両が5秒後に緊急停止をラッチし、
+    選択し直しても解除操作なしには動かせなくなる。
     """
-    out = transform(JOY_FULL, spec(ALL_DESTS, suppress=True))
+    outgoing = transform(JOY_FULL, selection, VEHICLES)
 
-    assert set(out) == ALL_DESTS
-    for vehicle_id, joy in out.items():
-        assert joy.axes[AXIS_ACCEL] == pytest.approx(+1.0), vehicle_id
-        assert joy.axes[AXIS_BRAKE] == pytest.approx(+1.0), vehicle_id
-        assert joy.axes[AXIS_STEER] == pytest.approx(0.0), vehicle_id
-        assert joy.axes[AXIS_DPAD_H] == pytest.approx(0.0), vehicle_id
-        assert joy.axes[AXIS_DPAD_V] == pytest.approx(0.0), vehicle_id
+    assert set(outgoing) == set(VEHICLES)
 
 
-def test_t02_output_always_has_exact_array_sizes():
-    """T-02: driver は buttons 11 / axes 8 を厳密に要求する。
+def test_t10_unselected_state_still_publishes_idle_joy_to_all():
+    """T-10: 未選択でも全車へ送り、軸は無操作値になる (REQ-10, REQ-13)。"""
+    outgoing = transform(JOY_FULL, SELECTION_NONE, VEHICLES)
 
-    違うと is_joystick_available() が偽になり停止指令に落ちる
-    (racing_kart_driver_node.cpp:186-187)。
+    assert set(outgoing) == set(VEHICLES)
+    for value in outgoing.values():
+        assert value.axes == NO_INPUT_AXES
+
+
+def test_t09b_no_target_vehicles_sends_nothing():
+    """T-09: 対象車両が空なら送らない。起動時に弾いているので通常は起きない。"""
+    assert transform(JOY_FULL, SELECTION_ALL, ()) == {}
+
+
+# ==========================================================================
+# 選択車 = 素通し
+# ==========================================================================
+
+
+def test_t11_selected_vehicle_receives_the_joy_unchanged():
+    """T-11: 選択車には軸もボタンも素通しする (REQ-12)。"""
+    joy = joy_with_buttons(BUTTON_A, BUTTON_Y, base=JOY_FULL)
+
+    outgoing = transform(joy, "A3", VEHICLES)
+
+    assert outgoing["A3"].axes == joy.axes
+    assert outgoing["A3"].buttons == joy.buttons
+
+
+def test_t11b_all_selection_passes_through_to_every_vehicle():
+    """T-11: 全台選択中は全車が選択車。A/X/Y も含めて等しく届く (REQ-12)。
+
+    Y を押せば全車が同時に自動運転へ入る。仕様として受け入れている
+    (§10「保証しないこと」)。
     """
-    specs = [
-        spec(ALL_DESTS, suppress=True),
-        spec({"A2"}),
-        spec(ALL_DESTS, suppress=True, force=True),
-    ]
-    for s in specs:
-        for joy in (JOY_NO_INPUT, JOY_FULL):
-            for out_joy in transform(joy, s).values():
-                assert len(out_joy.axes) == NUM_AXES
-                assert len(out_joy.buttons) == NUM_BUTTONS
+    joy = joy_with_buttons(BUTTON_Y, base=JOY_FULL)
+
+    outgoing = transform(joy, SELECTION_ALL, VEHICLES)
+
+    for vehicle_id in VEHICLES:
+        assert outgoing[vehicle_id].axes == joy.axes
+        assert outgoing[vehicle_id].buttons == joy.buttons
 
 
-# --------------------------------------------------------------------------
-# T-03 / T-04: 単車操作の素通しと、複数台時の不変性
-# --------------------------------------------------------------------------
+# ==========================================================================
+# 非選択車 = マスク
+# ==========================================================================
 
 
-def test_t03_single_mode_passes_axes_through_unchanged():
-    """T-03: 単車操作では軸を改変しない。"""
-    out = transform(JOY_FULL, spec({"A2"}))
+def test_t12_unselected_vehicle_receives_the_idle_axes():
+    """T-12: 非選択車の軸は無操作値になる (REQ-13)。
 
-    assert set(out) == {"A2"}
-    assert out["A2"].axes == JOY_FULL.axes
+    アクセルとブレーキは 0.0 ではなく +1.0 が無操作。0 で埋めると driver は
+    アクセル50%・ブレーキ50%を踏んだ扱いにする。
+    """
+    outgoing = transform(JOY_FULL, "A3", VEHICLES)
+
+    for vehicle_id in ("A2", "A7"):
+        assert outgoing[vehicle_id].axes == NO_INPUT_AXES
 
 
-@given(
-    axes=st.lists(
-        st.floats(min_value=-1.0, max_value=1.0, allow_nan=False),
-        min_size=NUM_AXES,
-        max_size=NUM_AXES,
-    )
+@pytest.mark.parametrize(
+    "button", [BUTTON_A, BUTTON_B, BUTTON_X, BUTTON_Y, BUTTON_LSB, BUTTON_RSB]
 )
-def test_t04_multi_destination_axes_never_leave_no_input(axes):
-    """T-04: 宛先が2台以上なら、入力の軸をどう動かしても出力は無操作のまま。
+def test_t13_unselected_vehicle_receives_no_buttons(button):
+    """T-13: 非選択車の A/B/X/Y と LSB/RSB は 0 になる (REQ-13)。
 
-    スティック1本で複数台をステアリングすることはできないため。
+    素通しにすると control_mode の切り替えと緊急停止解除が、選択していない車両にも
+    飛ぶ。緊急停止だけが例外である (test_emergency.py)。
     """
-    joy = JoyValue(axes=tuple(axes), buttons=NO_BUTTONS)
-    out = transform(joy, spec(ALL_DESTS, suppress=True))
+    joy = joy_with_buttons(button, base=JOY_FULL)
 
-    for out_joy in out.values():
-        assert out_joy.axes == NO_INPUT_AXES
+    outgoing = transform(joy, "A3", VEHICLES)
 
-
-# --------------------------------------------------------------------------
-# T-05 / T-06 / T-06b: 緊急停止
-# --------------------------------------------------------------------------
+    for vehicle_id in ("A2", "A7"):
+        assert outgoing[vehicle_id].buttons == NO_BUTTONS
 
 
-@pytest.mark.parametrize("button", EMERGENCY_BUTTONS)
-def test_t05_emergency_buttons_pass_through_to_every_destination(button):
-    """T-05: 緊急停止ボタン4種はいずれも、宛先の全車へ素通しされる。"""
-    joy = joy_with_buttons(button)
-    out = transform(joy, spec(ALL_DESTS, suppress=True))
+def test_t13b_gear_dpad_does_not_reach_unselected_vehicles():
+    """T-13: ギア操作 (Dpad) も非選択車には届かない。無操作値の一部として 0 になる。"""
+    outgoing = transform(JOY_FULL, "A3", VEHICLES)
 
-    assert set(out) == ALL_DESTS
-    for vehicle_id, out_joy in out.items():
-        assert out_joy.buttons[button] == 1, vehicle_id
+    assert JOY_FULL.axes[7] == +1.0  # ギアD を入れている
+    assert outgoing["A2"].axes[6] == 0.0
+    assert outgoing["A2"].axes[7] == 0.0
 
 
-def test_t06_force_emergency_sets_all_four_buttons():
-    """T-06: 自発フォールバックでは緊急停止ボタン4つすべてを 1 にする。
+# ==========================================================================
+# 形の保証
+# ==========================================================================
 
-    driver は OR で見るので1つでも足りるが、4つ立てることで取りこぼしを無くし、
-    かつ「4つ同時 = manager が合成した緊急停止」の署名として rosbag から判別できる。
+
+@pytest.mark.parametrize("selection", [SELECTION_NONE, SELECTION_ALL, "A3"])
+def test_t14_outgoing_joy_always_has_the_required_size(selection):
+    """T-14: 送出する joy は常に axes 8 / buttons 11 (REQ-11)。
+
+    driver は要素数が一致しない joy を使わず停止指令に落とす。
     """
-    out = transform(JOY_NO_INPUT, spec(ALL_DESTS, suppress=True, force=True))
-
-    for vehicle_id, out_joy in out.items():
-        for button in EMERGENCY_BUTTONS:
-            assert out_joy.buttons[button] == 1, f"{vehicle_id} buttons[{button}]"
-        assert out_joy.axes == NO_INPUT_AXES, vehicle_id
+    for joy in (JOY_NO_INPUT, JOY_FULL, JoyValue(axes=(), buttons=())):
+        for value in transform(joy, selection, VEHICLES).values():
+            assert len(value.axes) == NUM_AXES
+            assert len(value.buttons) == NUM_BUTTONS
 
 
-def test_t06b_force_emergency_is_idempotent():
-    """T-06b: オペレータが既に押している場合も出力は同じ (冪等)。"""
-    already = joy_with_buttons(EMERGENCY_BUTTONS[0])
-    s = spec(ALL_DESTS, suppress=True, force=True)
+@pytest.mark.parametrize("selection", [SELECTION_NONE, SELECTION_ALL, "A3"])
+def test_t15_stamp_is_carried_over(selection):
+    """T-15: header.stamp は入力の joy から引き継ぐ (REQ-15)。"""
+    joy = JoyValue(axes=JOY_FULL.axes, buttons=JOY_FULL.buttons, stamp_ns=1234567890)
 
-    assert transform(already, s) == transform(JOY_NO_INPUT, s)
-
-
-# --------------------------------------------------------------------------
-# T-07 / T-08: 宛先
-# --------------------------------------------------------------------------
-
-
-def test_t07_single_destination_reaches_only_that_vehicle():
-    """T-07: 単車操作では対象1台にしか出力しない。他3台には1件も出さない。"""
-    out = transform(JOY_FULL, spec({"A2"}))
-
-    assert set(out) == {"A2"}
-    for other in ("A3", "A6", "A7"):
-        assert other not in out
-
-
-def test_t08_park_publishes_nothing():
-    """T-08: 宛先が空なら何も出さない。"""
-    assert transform(JOY_FULL, spec(frozenset())) == {}
-
-
-# --------------------------------------------------------------------------
-# T-09 / T-10: 素通し性と追跡性
-# --------------------------------------------------------------------------
-
-
-@given(
-    buttons=st.lists(
-        st.integers(min_value=0, max_value=1),
-        min_size=NUM_BUTTONS,
-        max_size=NUM_BUTTONS,
-    )
-)
-def test_t09_buttons_pass_through_when_not_forcing(buttons):
-    """T-09: force_emergency でなければボタンは完全素通し。
-
-    ButtonY をマスクしない (joy を解釈しない方針) ことの確認でもある。
-    """
-    joy = JoyValue(axes=NO_INPUT_AXES, buttons=tuple(buttons))
-    out = transform(joy, spec(ALL_DESTS, suppress=True))
-
-    for out_joy in out.values():
-        assert out_joy.buttons == tuple(buttons)
-
-
-def test_t10_stamp_is_carried_over():
-    """T-10: header.stamp は入力から引き継ぐ。
-
-    driver は自身の now() を使うので安全性には影響しないが、
-    zenoh 経由の遅延計測に使えるようにする。
-    """
-    joy = JoyValue(axes=NO_INPUT_AXES, buttons=NO_BUTTONS, stamp_ns=123_456_789)
-    out = transform(joy, spec(ALL_DESTS, suppress=True))
-
-    for out_joy in out.values():
-        assert out_joy.stamp_ns == 123_456_789
-
-
-# --------------------------------------------------------------------------
-# T-11: 分岐の穴埋め
-# --------------------------------------------------------------------------
-
-
-def test_t11_force_emergency_pads_short_button_arrays():
-    """T-11: buttons が足りない入力でも緊急停止ボタンを立てられる。
-
-    サイズ異常の入力自体は素通しの方針だが、こちらが値を作る場面では
-    IndexError で落とさない。
-    """
-    short = JoyValue(axes=NO_INPUT_AXES, buttons=(0, 0))
-    out = transform(short, spec(ALL_DESTS, suppress=True, force=True))
-
-    for out_joy in out.values():
-        assert len(out_joy.buttons) == NUM_BUTTONS
-        for button in EMERGENCY_BUTTONS:
-            assert out_joy.buttons[button] == 1
+    for value in transform(joy, selection, VEHICLES).values():
+        assert value.stamp_ns == 1234567890
