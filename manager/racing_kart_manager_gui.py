@@ -16,6 +16,7 @@ manager とは別プロセス。GUI が落ちても manager は joy を流し続
 from __future__ import annotations
 
 import json
+import signal
 import threading
 import tkinter as tk
 
@@ -195,6 +196,16 @@ def main() -> None:
     spinner.start()
 
     window = ManagerWindow(bridge)
+
+    # rclpy.init() が SIGTERM を横取りするので、ここで上書きする。そのままだと
+    # make remote-stop の TERM で Tk の mainloop が抜けず、GUI だけが残る。
+    # ハンドラは _refresh の after() で Python に戻る隙 (100ms ごと) に走る。
+    def on_terminate(signum, frame) -> None:  # noqa: ARG001
+        window.root.quit()
+
+    signal.signal(signal.SIGTERM, on_terminate)
+    signal.signal(signal.SIGINT, on_terminate)
+
     try:
         window.run()
     except KeyboardInterrupt:

@@ -8,53 +8,68 @@
 
 ```text
 車両ECU (本体リポジトリ)                        遠隔操作PC (このリポジトリ)
-  Autoware / driver / DDS                        joy → manager → zenoh
+  Autoware / driver / DDS                        joy → manager → zenoh   ホスト
         │                                                    │
-   zenoh-bridge-ros2dds ──── TLS ── 中継サーバ ──── zenoh-bridge-ros2dds
+   zenoh-bridge-ros2dds ──── TLS ── 中継サーバ ──── zenoh-bridge-ros2dds  ホスト
                                                              │
-                                                       RViz (遠隔監視)
+                                                       RViz (遠隔監視)    コンテナ
 ```
 
 ## セットアップ
 
+**RViz 以外はすべてホストで動きます。** コンテナに残しているのは RViz だけで、Autoware の
+RViz プラグインと `map_loader` が要るためです。
+
+### ホストに入れるもの
+
 ```bash
-cp .env.example .env          # 必要なら編集
-./docker_build.sh remote      # 遠隔操作イメージ
-./docker_build.sh rviz        # 遠隔監視イメージ
+sudo apt install ros-humble-ros-base ros-humble-joy python3-tk
+sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb
+```
+
+manager が使うのは `rclpy` + `sensor_msgs` + `std_msgs` だけです。Autoware も
+`racing_kart_msgs` も要りません。`ros-humble-desktop` が既に入っていればそれで足ります。
+
+### リポジトリ側
+
+```bash
+cp .env.example .env    # 必要なら編集
+./docker_build.sh rviz  # 遠隔監視イメージ（RViz のみ）
 ```
 
 mTLS 素材（zip で別配布）を展開して `tls/` に置いてください。リポジトリには含まれません。
 
-### zenoh ブリッジ（ホストに入れる）
-
-zenoh ブリッジだけはコンテナに入れず**ホストで動かします**。`make remote` がホストの
-`scripts/run_zenoh.bash` を直接叩くので、deb を入れておいてください。
-
-```bash
-sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb
-```
-
-compose は `network_mode: host` なので、ホストのブリッジとコンテナ側の manager は
-同じ `ROS_DOMAIN_ID=0` で噛み合います。
-
-ランチャGUI（`gui_tools.py`）から joy をホストで起動する場合は、ROS 2 Humble
-（`ros-humble-joy`）もホストに必要です。
+RViz コンテナは `network_mode: host` なので、ホスト側のノードと同じ `ROS_DOMAIN_ID=0`
+で噛み合います。
 
 ## 使い方
 
 ### 遠隔操作
 
 ```bash
-make remote VEHICLES="A2 A3 A7"   # zenoh(ホスト) + joy/manager/GUI(コンテナ)
-make ps                            # コンテナの状態
+make remote VEHICLES="A2 A3 A7"   # zenoh + joy + manager + GUI（すべてホスト）
+make ps                            # 生きているプロセス一覧
 make logs                          # manager のログ
 make remote-stop                   # 停止
 ```
 
-zenoh ブリッジは車両1台につき1プロセスがホストで立ちます（`setsid` で端末から切り離す
-ので make が返っても生き残ります）。PID は `output/zenoh.pid`、ログは
-`output/<timestamp>/remote/zenoh-<VEHICLE_ID>.log` です。`make remote-stop` が TERM を
-送ると、`run_zenoh.bash` が子のブリッジを全部畳みます。
+`make remote` は `scripts/run_remote.bash` を `setsid` で起こし、そこから zenoh ブリッジ
+（車両1台につき1プロセス）・joy・manager・操作GUI を起動します。`setsid` で端末から
+切り離すので make が返っても生き残ります。
+
+PID は `output/remote.pid` の1つだけです。`setsid` によって `run_remote.bash` が
+セッションリーダーになり、**子も孫も同じプロセスグループに入ります**。`make remote-stop`
+はそのグループごと `kill -TERM -<PID>` で畳みます。`ros2 run` は joy_node を subprocess
+で起こすため、親だけを kill すると joy_node が孤児として残るからです。停止後に残っている
+プロセスがあれば `make remote-stop` が警告します。
+
+ログは `output/<timestamp>/remote/` に `zenoh-<VEHICLE_ID>.log` / `joy.log` /
+`manager.log` / `manager-gui.log` として並びます。`output/latest/remote` が最新の
+ディレクトリを指します。
+
+**子が落ちても上げ直しません。** 黙って復活すると不安定なまま運用を続けてしまうためです。
+何が生きているかは `make ps` で見てください。zenoh ブリッジの再接続だけは
+`run_zenoh.bash` が自前で面倒をみます（通信断からの復帰は当然のため）。
 
 対象車両に既定値はありません。GUI の「全台」も緊急停止の宛先も、ここで渡した車両で決まります。
 
@@ -89,8 +104,8 @@ python3 scripts/gui_tools.py        # Zenoh / RViz / Joy の start・stop・rest
 ```
 
 `make remote` が複数台をまとめて扱う（`run_zenoh.bash`、再接続あり）のに対し、
-`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。どちらもホストで動きます。
-RViz は GUI からでも `make rviz` 経由で Docker で起動します。
+`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。RViz は GUI からでも
+`make rviz` 経由で Docker で起動します。
 
 ## ディレクトリ構成
 
@@ -98,7 +113,7 @@ RViz は GUI からでも `make rviz` 経由で Docker で起動します。
 |---|---|
 | `manager/` | 遠隔操作ロジック。`racing_kart_manager_core.py` は ROS 非依存で、`tests/` は ROS を起動せず pytest だけで走ります |
 | `docs/` | 仕様。`docs/spec/joy-routing.md` が manager の正本です |
-| `scripts/` | 起動・接続スクリプト（zenoh、joy、manager、RViz） |
+| `scripts/` | 起動・接続スクリプト。`run_remote.bash` が遠隔操作一式のエントリポイントです |
 | `shared/` | **本体リポジトリからの複製。同期が必要**（下記） |
 | `rviz/` | 遠隔監視 RViz 用のアセット（地図、車体モデル、rviz 設定、launch、プラグイン） |
 | `vendor/` | zenoh-bridge-ros2dds の deb |
@@ -136,11 +151,11 @@ CI で突き合わせる仕組みを入れる予定です（未実装）。
 
 | イメージ | ベース | サイズ | 用途 |
 |---|---|---|---|
-| `aichallenge-remote` | `ros:humble-ros-base` | 約 1.0GB | joy / manager / GUI |
 | `aichallenge-remote-rviz` | Autoware universe | 約 14GB | 遠隔監視 RViz |
 
-遠隔操作側は Autoware を必要としません。`rclpy` + `sensor_msgs` + `std_msgs` だけで足ります。
-RViz 側は Autoware の RViz プラグインと `map_loader` を使うので Autoware ベースのままです。
+イメージは1つだけです。遠隔操作側（joy / manager / GUI / zenoh）は Autoware を必要とせず、
+ホストの ROS 2 Humble で足りるのでコンテナに入れていません。RViz 側は Autoware の RViz
+プラグインと `map_loader` を使うので Autoware ベースのままです。
 
 車体モデルと地図は `COPY` するだけで colcon build を必要としません
 （`ament_auto_package(INSTALL_TO_SHARE)` と同じことを Dockerfile で行っています）。

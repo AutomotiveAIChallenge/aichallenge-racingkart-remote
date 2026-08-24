@@ -1,73 +1,36 @@
-# 遠隔操作PC用の compose。本体リポジトリ (aichallenge-racingkart) の docker-compose.yml と
-# 同じ作法で書いている。イメージは ./docker_build.sh remote / rviz で作る。
+# 遠隔監視 RViz 用の compose。
 #
-# 遠隔側は常に ROS_DOMAIN_ID 0。車両側の domain とは無関係で、車両IDで区別する。
-# 全車両が /<VEHICLE_ID>/... の下にまとめて見える。
-
-x-remote-base: &remote-base
-  image: "aichallenge-remote"
-  pull_policy: never
-  network_mode: host
-  stop_grace_period: 10s
-  user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-  environment: &remote-env
-    - HOME=/tmp
-    - DISPLAY=${DISPLAY:-}
-    - USER=${USER}
-    - ROS_DISTRO=humble
-    - XAUTHORITY=${XAUTHORITY:-}
-    - QT_X11_NO_MITSHM=1
-    - TZ=Asia/Tokyo
-    - HOST_UID=${HOST_UID:-}
-    - HOST_GID=${HOST_GID:-}
-    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
-    - LOG_DIR=${LOG_DIR:-}
-  volumes: &remote-volumes
-    - ./output:${OUTPUT_ROOT:-/output}
-    - ./manager:/manager
-    - ./scripts:/scripts
-    - ./shared:/shared
-    - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    - /dev/dri:/dev/dri
-    - ${XAUTHORITY:-/dev/null}:${XAUTHORITY:-/dev/null}:rw
-    - /etc/passwd:/etc/passwd:ro
-    - /etc/group:/etc/group:ro
-  devices:
-    - /dev/dri
-    - /dev/input
-  group_add:
-    # /dev/input/event* を非 root で読む (joy_node/SDL2)。ホストの input グループ GID。
-    - "${HOST_GID_INPUT:-104}"
-  working_dir: /scripts
+# コンテナに残しているのは RViz だけ。Autoware の RViz プラグインと map_loader が
+# 要るためで、zenoh ブリッジ・joy・manager・操作GUI はホストで動かす (make remote)。
+#
+# network_mode: host なので、ホスト側のノードとこのコンテナは同じ ROS_DOMAIN_ID 0 で
+# 噛み合う。遠隔側は常に 0 で、車両側の domain とは無関係に車両IDで区別する。
 
 services:
-#### 遠隔操作（make remote VEHICLES="A2 A3 A7"）####
-  # zenoh ブリッジはここに居ない。make remote がホストで scripts/run_zenoh.bash を
-  # 直接叩く。network_mode: host なので、ホストのブリッジとこれらのコンテナは
-  # 同じ ROS_DOMAIN_ID 0 で噛み合う。
-  joy:
-    <<: *remote-base
-    command: ["bash", "-lc", "exec /scripts/joy.bash"]
-
-  manager:
-    <<: *remote-base
-    command: ["bash", "-lc", 'exec /scripts/manager.bash manager ${VEHICLES:-}']
-
-  # manager とは別プロセス。GUI が落ちても manager は joy を流し続ける。
-  manager-gui:
-    <<: *remote-base
-    command: ["bash", "-lc", "exec /scripts/manager.bash gui"]
-
-#### 遠隔監視（make rviz VEHICLE=A3）####
+  #### 遠隔監視（make rviz VEHICLE=A3）####
   # RVIZ_VEHICLE_ID は make rviz が渡す。指定すると zenoh 経由の /<ID>/... を
   # prefix なしに中継してから RViz を開く（scripts/run_rviz.bash 参照）。
   rviz2:
-    <<: *remote-base
     image: "aichallenge-remote-rviz"
-    environment: *remote-env
+    pull_policy: never
+    network_mode: host
+    stop_grace_period: 10s
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    working_dir: /scripts
+    environment:
+      - HOME=/tmp
+      - DISPLAY=${DISPLAY:-}
+      - USER=${USER}
+      - ROS_DISTRO=humble
+      - XAUTHORITY=${XAUTHORITY:-}
+      - QT_X11_NO_MITSHM=1
+      - TZ=Asia/Tokyo
+      - HOST_UID=${HOST_UID:-}
+      - HOST_GID=${HOST_GID:-}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - LOG_DIR=${LOG_DIR:-}
     volumes:
       - ./output:${OUTPUT_ROOT:-/output}
-      - ./manager:/manager
       - ./scripts:/scripts
       - ./shared:/shared
       - ./rviz:/rviz
@@ -76,4 +39,6 @@ services:
       - ${XAUTHORITY:-/dev/null}:${XAUTHORITY:-/dev/null}:rw
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro
+    devices:
+      - /dev/dri
     command: ["bash", "-lc", "exec /scripts/run_rviz.bash ${RVIZ_VEHICLE_ID:-}"]
