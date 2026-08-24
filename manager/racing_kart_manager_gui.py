@@ -3,11 +3,14 @@
 
 manager とは別プロセス。GUI が落ちても manager は joy を流し続ける。
 
-**この GUI は判断をしない。** ボタンの活性・非活性も表示文言も manager が
-送ってきた status をそのまま使う。唯一の例外は status 途絶とバージョン
-不一致の検出で、これは manager 自身からは送れないため gui_gate() で行う。
+**この GUI は判断をしない。** 押せないボタンは無く、選択の可否も条件も持たない。
+唯一の例外は status 途絶とバージョン不一致の検出で、これは manager 自身からは
+送れないため gui_gate() で行う。検出しても塞ぐのは選択の表示だけで、ボタンは
+押せるままにする。
 
-仕様: docs/spec/multi-vehicle-start-stop.md の「GUI インタフェース」
+画面に出るのはボタンだけ。今の選択に対応するボタンを赤くする。
+
+仕様: docs/spec/joy-routing.md
 """
 
 from __future__ import annotations
@@ -15,7 +18,6 @@ from __future__ import annotations
 import json
 import threading
 import tkinter as tk
-from tkinter import ttk
 
 import rclpy
 from rclpy.node import Node
@@ -27,7 +29,12 @@ from rclpy.qos import (
 )
 from std_msgs.msg import String
 
-from racing_kart_manager_core import SCHEMA_VERSION, gui_gate
+from racing_kart_manager_core import (
+    SELECTION_ALL,
+    SELECTION_NONE,
+    command_to_json,
+    gui_gate,
+)
 
 STATUS_QOS = QoSProfile(
     depth=1,
@@ -43,7 +50,12 @@ COMMAND_QOS = QoSProfile(
 
 REFRESH_MS = 100
 
-LEVEL_COLOR = {"info": "#637381", "warn": "#B76E00", "error": "#B71D18"}
+#: 選択中のボタンの色。ttk ではなく tk.Button を使うのは、Linux の ttk テーマが
+#: ボタンの background を無視することがあり、赤くならないため。
+SELECTED_BG = "#D32F2F"
+SELECTED_FG = "#FFFFFF"
+
+BUTTON_FONT = ("", 14, "bold")
 
 
 class GuiBridge(Node):
@@ -82,14 +94,11 @@ class GuiBridge(Node):
                 return None, None
             return self._status, self._now() - self._status_at
 
-    def send(self, command: str, vehicle_id: str | None = None) -> None:
-        payload = {"schema_version": SCHEMA_VERSION, "command": command}
-        if vehicle_id is not None:
-            payload["vehicle_id"] = vehicle_id
+    def send(self, target: str) -> None:
         message = String()
-        message.data = json.dumps(payload)
+        message.data = command_to_json(target)
         self._command_publisher.publish(message)
-        self.get_logger().info(f"command sent: {payload}")
+        self.get_logger().info(f"command sent: {message.data}")
 
 
 class ManagerWindow:
@@ -97,140 +106,82 @@ class ManagerWindow:
         self.bridge = bridge
         self.root = tk.Tk()
         self.root.title("racing_kart_manager")
-        self.root.geometry("760x520")
+        self.root.minsize(480, 96)
 
-        outer = ttk.Frame(self.root, padding=12)
-        outer.pack(fill="both", expand=True)
+        self.frame = tk.Frame(self.root, padx=12, pady=12)
+        self.frame.pack(fill="both", expand=True)
 
-        self.mode_label = ttk.Label(outer, text="—", font=("", 14, "bold"))
-        self.mode_label.pack(anchor="w", pady=(0, 10))
-
-        controls = ttk.Frame(outer)
-        controls.pack(fill="x")
-
-        # 左: 車両選択
-        vehicles_frame = ttk.LabelFrame(controls, text="車両選択", padding=10)
-        vehicles_frame.pack(side="left", fill="both", expand=True)
-
-        # 車両ボタンは status を受け取ってから作る。対象車両は manager の起動引数で
-        # 決まるので、GUI 側では台数も車両IDも知らない。
-        self.vehicles_frame = vehicles_frame
-        self.vehicle_ids: tuple[str, ...] = ()
-        self.vehicle_buttons: dict[str, ttk.Button] = {}
-        self.vehicle_states: dict[str, ttk.Label] = {}
-        self.vehicle_reasons: dict[str, ttk.Label] = {}
-
-        # 右: 一斉発進準備完了
-        all_frame = ttk.LabelFrame(controls, text="一斉発進", padding=10)
-        all_frame.pack(side="left", fill="both", expand=True, padx=(12, 0))
-        self.all_button = ttk.Button(
-            all_frame,
-            text="一斉発進準備完了",
-            command=lambda: self.bridge.send("enter_all_mode"),
-        )
-        self.all_button.pack(pady=6)
-        self.all_reason = ttk.Label(
-            all_frame, text="", font=("", 8), foreground="#B76E00", wraplength=220
-        )
-        self.all_reason.pack()
-
-        # 下: メッセージ表示エリア
-        messages_frame = ttk.LabelFrame(outer, text="メッセージ", padding=8)
-        messages_frame.pack(fill="both", expand=True, pady=(12, 0))
-        self.messages = tk.Text(messages_frame, height=8, state="disabled", wrap="word")
-        self.messages.pack(fill="both", expand=True)
-        for level, color in LEVEL_COLOR.items():
-            self.messages.tag_configure(level, foreground=color)
+        # 対象車両は manager の起動引数で決まる。GUI は台数も車両IDも知らないので、
+        # status を受け取ってからボタンを作る。
+        self.targets: tuple[str, ...] = ()
+        self.buttons: dict[str, tk.Button] = {}
+        self.default_colors: tuple[str, str] | None = None
 
         self.root.after(REFRESH_MS, self._refresh)
 
-    def _set_enabled(self, button: ttk.Button, enabled: bool) -> None:
-        button.state(["!disabled"] if enabled else ["disabled"])
-
-    def _rebuild_vehicles(self, vehicle_ids: tuple[str, ...]) -> None:
+    def _rebuild(self, vehicle_ids: tuple[str, ...]) -> None:
         """対象車両が変わったらボタンを作り直す。"""
-        for child in self.vehicles_frame.winfo_children():
+        for child in self.frame.winfo_children():
             child.destroy()
-        self.vehicle_buttons.clear()
-        self.vehicle_states.clear()
-        self.vehicle_reasons.clear()
+        self.buttons.clear()
 
-        for index, vehicle_id in enumerate(vehicle_ids):
-            cell = ttk.Frame(self.vehicles_frame, padding=4)
-            cell.grid(row=index // 2, column=index % 2, sticky="nsew")
-            button = ttk.Button(
-                cell,
-                text=vehicle_id,
-                width=12,
-                command=lambda v=vehicle_id: self.bridge.send("enter_single_mode", v),
+        labels = [(SELECTION_NONE, "未選択")]
+        labels += [(vehicle_id, vehicle_id) for vehicle_id in vehicle_ids]
+        labels.append((SELECTION_ALL, "全台"))
+
+        for target, text in labels:
+            button = tk.Button(
+                self.frame,
+                text=text,
+                font=BUTTON_FONT,
+                width=8,
+                height=2,
+                command=lambda t=target: self.bridge.send(t),
             )
-            button.pack()
-            state = ttk.Label(cell, text="—", font=("", 8), wraplength=150)
-            state.pack()
-            reason = ttk.Label(
-                cell, text="", font=("", 8), foreground="#B76E00", wraplength=150
-            )
-            reason.pack()
-            self.vehicle_buttons[vehicle_id] = button
-            self.vehicle_states[vehicle_id] = state
-            self.vehicle_reasons[vehicle_id] = reason
-        self.vehicle_ids = vehicle_ids
+            button.pack(side="left", padx=6)
+            self.buttons[target] = button
+
+        if self.default_colors is None and self.buttons:
+            sample = next(iter(self.buttons.values()))
+            self.default_colors = (sample.cget("background"), sample.cget("foreground"))
+
+        self.targets = vehicle_ids
+
+    def _highlight(self, selection: str | None) -> None:
+        """選択中のボタンだけを赤くする。selection が None ならどれも赤くしない。"""
+        assert self.default_colors is not None
+        default_bg, default_fg = self.default_colors
+        for target, button in self.buttons.items():
+            if target == selection:
+                button.config(
+                    background=SELECTED_BG,
+                    foreground=SELECTED_FG,
+                    activebackground=SELECTED_BG,
+                    activeforeground=SELECTED_FG,
+                )
+            else:
+                button.config(
+                    background=default_bg,
+                    foreground=default_fg,
+                    activebackground=default_bg,
+                    activeforeground=default_fg,
+                )
 
     def _refresh(self) -> None:
         payload, age = self.bridge.snapshot()
         gate = gui_gate(age, None if payload is None else payload.get("schema_version"))
 
-        if not gate.usable:
-            self.mode_label.config(text=gate.reason or "操作できません")
-            self._set_enabled(self.all_button, False)
-            self.all_reason.config(text="")
-            for vehicle_id in self.vehicle_ids:
-                self._set_enabled(self.vehicle_buttons[vehicle_id], False)
-                self.vehicle_states[vehicle_id].config(text="—")
-                self.vehicle_reasons[vehicle_id].config(text="")
-            self._render_messages([{"level": "error", "text": gate.reason or ""}])
-            self.root.after(REFRESH_MS, self._refresh)
-            return
+        if payload is not None:
+            vehicle_ids = tuple(payload.get("vehicles", ()))
+            if vehicle_ids != self.targets:
+                self._rebuild(vehicle_ids)
 
-        assert payload is not None
-        selected = payload.get("selected")
-        self.mode_label.config(
-            text=f"モード: {payload['mode']}" + (f" ({selected})" if selected else "")
-        )
+        if self.buttons:
+            # status が古ければ選択は分からない。古い選択を今のものとして
+            # 見せるくらいなら、どれも赤くしない。
+            self._highlight(payload.get("selection") if gate.usable else None)
 
-        messages = payload.get("messages", [])
-
-        def reasons_for(target: str) -> str:
-            return "\n".join(m["text"] for m in messages if target in m.get("targets", []))
-
-        self._set_enabled(self.all_button, bool(payload["can_enter_all_mode"]))
-        self.all_reason.config(text=reasons_for("all"))
-
-        by_id = {v["vehicle_id"]: v for v in payload["vehicles"]}
-        vehicle_ids = tuple(by_id)
-        if vehicle_ids != self.vehicle_ids:
-            self._rebuild_vehicles(vehicle_ids)
-
-        for vehicle_id in vehicle_ids:
-            vehicle = by_id[vehicle_id]
-            self._set_enabled(
-                self.vehicle_buttons[vehicle_id],
-                bool(payload["can_enter_single_mode"].get(vehicle_id)),
-            )
-            # 文言は manager が作る。GUI は変換表を持たない (観点 F-1)
-            self.vehicle_states[vehicle_id].config(text=vehicle.get("label", "—"))
-            self.vehicle_reasons[vehicle_id].config(text=reasons_for(vehicle_id))
-
-        self._render_messages(messages)
         self.root.after(REFRESH_MS, self._refresh)
-
-    def _render_messages(self, messages: list[dict]) -> None:
-        self.messages.config(state="normal")
-        self.messages.delete("1.0", "end")
-        for message in messages:
-            level = message.get("level", "info")
-            self.messages.insert("end", message.get("text", "") + "\n", level)
-        self.messages.config(state="disabled")
 
     def run(self) -> None:
         self.root.mainloop()
@@ -239,10 +190,15 @@ class ManagerWindow:
 def main() -> None:
     rclpy.init()
     bridge = GuiBridge()
+
     spinner = threading.Thread(target=rclpy.spin, args=(bridge,), daemon=True)
     spinner.start()
+
+    window = ManagerWindow(bridge)
     try:
-        ManagerWindow(bridge).run()
+        window.run()
+    except KeyboardInterrupt:
+        pass
     finally:
         bridge.destroy_node()
         rclpy.try_shutdown()
