@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """racing_kart_manager のエントリ。
 
-joy の中継と選択の GUI を1つのプロセスで行う (REQ-01)。判断はすべて
+joy の中継・選択の GUI・レース通知を1つのプロセスで行う (REQ-01)。判断はすべて
 racing_kart_manager_core の純関数が行い、このファイルは「購読して、呼んで、publish
 する」だけの薄い層に徹する。
 
-スレッドは2つ。
+スレッドは3つ。
 
-    メイン    Tk の mainloop、ボタン、100ms の再描画
-    ROS 実行  joy の受信・変換・publish
+    メイン        Tk の mainloop、ボタン、100ms の再描画
+    ROS 実行      joy の受信・変換・publish・レース通知の立ち上がり判定
+    race_notifier mosquitto_pub の起動と再試行
 
-守る約束は2つ。
+守る約束は3つ。
 
     1. Tk のウィジェットに触るのはメインスレッドだけ (Tkinter はスレッドセーフでない)
     2. node.selection を書くのはメインスレッドだけ。ROS スレッドは読むだけ
+    3. joy のコールバックは外部 I/O を待たない。通知はキューに積んで即座に戻る
 
-仕様: docs/spec/joy-routing.md
+仕様: docs/spec/joy-routing.md, docs/spec/race-notification.md
 """
 
 from __future__ import annotations
 
+import logging
 import signal
 import sys
 import threading
@@ -28,10 +31,13 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
 
+from race_notifier import RaceNotifier, config_from_env
 from racing_kart_manager_core import (
     INITIAL_SELECTION,
     JoyValue,
     parse_vehicles,
+    race_events,
+    race_triggers,
     transform,
 )
 from racing_kart_manager_gui import ManagerWindow
@@ -59,7 +65,7 @@ def to_ros_joy(value: JoyValue) -> Joy:
 
 
 class RacingKartManagerNode(Node):
-    def __init__(self, vehicles: tuple[str, ...]) -> None:
+    def __init__(self, vehicles: tuple[str, ...], notifier: RaceNotifier) -> None:
         super().__init__("racing_kart_manager")
 
         self.vehicles = vehicles
@@ -67,6 +73,12 @@ class RacingKartManagerNode(Node):
         #: GUI (メインスレッド) が書き、joy のコールバック (ROS スレッド) が読む。
         #: 書き手が1つで、読み書きとも文字列1つの代入なのでロックは要らない。
         self.selection = INITIAL_SELECTION
+
+        self._notifier = notifier
+
+        #: レース通知の立ち上がり判定用。_on_joy の中だけで読み書きする。
+        #: 単一スレッドの executor で直列に走ることが前提 (REQ-04)。
+        self._triggers = None
 
         self._joy_publishers = {
             vehicle_id: self.create_publisher(Joy, f"/{vehicle_id}/racing_kart/joy", 1)
@@ -92,8 +104,15 @@ class RacingKartManagerNode(Node):
         for vehicle_id, outgoing in transform(value, selection, self.vehicles).items():
             self._joy_publishers[vehicle_id].publish(to_ros_joy(outgoing))
 
+        triggers = race_triggers(value, selection)
+        for event in race_events(self._triggers, triggers):
+            self._notifier.publish(event, value.stamp_ns)
+        self._triggers = triggers
+
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="[%(name)s] %(message)s")
+
     vehicles = parse_vehicles(sys.argv[1:])
     if vehicles is None:
         print(
@@ -104,6 +123,8 @@ def main() -> None:
         )
         raise SystemExit(1)
 
+    notifier = RaceNotifier(config_from_env())
+
     # 起動のどこで失敗しても後始末が走るように、ここから finally の中に入れる。
     # 途中で落ちたときに部品が半端に残ると、プロセスグループに死なないプロセスが
     # 居座る。
@@ -111,7 +132,7 @@ def main() -> None:
     spinner = None
     try:
         rclpy.init()
-        node = RacingKartManagerNode(vehicles)
+        node = RacingKartManagerNode(vehicles, notifier)
 
         # ROS は別スレッドで回す。GUI の描画や操作が joy の中継を止めないため (REQ-03)。
         # rclpy.spin は単一スレッドの executor を使う。joy のコールバックが到着順に
@@ -140,6 +161,7 @@ def main() -> None:
             spinner.join(timeout=SHUTDOWN_TIMEOUT_S)
         if node is not None:
             node.destroy_node()
+        notifier.close()
 
 
 if __name__ == "__main__":

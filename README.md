@@ -23,12 +23,13 @@ RViz プラグインと `map_loader` が要るためです。
 ### ホストに入れるもの
 
 ```bash
-sudo apt install ros-humble-ros-base ros-humble-joy python3-tk
+sudo apt install ros-humble-ros-base ros-humble-joy python3-tk mosquitto-clients
 sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb
 ```
 
-manager が使うのは `rclpy` + `sensor_msgs` だけです。Autoware も
-`racing_kart_msgs` も要りません。`ros-humble-desktop` が既に入っていればそれで足ります。
+manager が使うのは `rclpy` + `sensor_msgs` だけです。Autoware も `racing_kart_msgs` も
+要りません。`ros-humble-desktop` が既に入っていればそれで足ります。`mosquitto-clients` は
+レース開始・終了通知（MQTT）に使います。
 
 ### リポジトリ側
 
@@ -38,6 +39,10 @@ cp .env.example .env    # 必要なら編集
 ```
 
 mTLS 素材（zip で別配布）を展開して `tls/` に置いてください。リポジトリには含まれません。
+
+レース通知を使うなら、`.env` に MQTT の認証情報を書いてください（`MQTT_USERNAME` /
+`MQTT_PASSWORD`）。**認証情報はリポジトリに置きません。** `MQTT_HOST` を空にすると通知を
+送らず、manager はそのまま起動します。
 
 RViz コンテナは `network_mode: host` なので、ホスト側のノードと同じ `ROS_DOMAIN_ID=0`
 で噛み合います。
@@ -54,8 +59,8 @@ make remote-stop                   # 停止
 ```
 
 `make remote` は `scripts/run_remote.bash` を `setsid` で起こし、そこから zenoh ブリッジ
-（車両1台につき1プロセス）・joy・manager を起動します。`setsid` で端末から
-切り離すので make が返っても生き残ります。
+（車両1台につき1プロセス）・joy・manager を起動します。`.env` を読むのもここです。
+`setsid` で端末から切り離すので make が返っても生き残ります。
 
 PID は `output/remote.pid` の1つだけです。`setsid` によって `run_remote.bash` が
 セッションリーダーになり、**子も孫も同じプロセスグループに入ります**。`make remote-stop`
@@ -65,6 +70,7 @@ PID は `output/remote.pid` の1つだけです。`setsid` によって `run_rem
 
 ログは `output/<timestamp>/remote/` に `zenoh-<VEHICLE_ID>.log` / `joy.log` /
 `manager.log` として並びます。`output/latest/remote` が最新のディレクトリを指します。
+レース通知の送信結果も `manager.log` に出ます。
 
 **子が落ちても上げ直しません。** 黙って復活すると不安定なまま運用を続けてしまうためです。
 何が生きているかは `make ps` で見てください。zenoh ブリッジの再接続だけは
@@ -74,7 +80,8 @@ PID は `output/remote.pid` の1つだけです。`setsid` によって `run_rem
 
 ### 操作モデル
 
-manager の仕様は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md) にあります。要点だけ:
+manager の仕様は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md)（joy の配り方）と
+[`docs/spec/race-notification.md`](docs/spec/race-notification.md)（レース通知）にあります。要点だけ:
 
 - GUI で「未選択 / 車両1台 / 全台」を選びます。選択中のボタンが赤くなります。
 - スティックが効くのは選択車だけです。非選択車には無操作の joy が届きます（送るのを止めると
@@ -83,8 +90,11 @@ manager の仕様は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md) に�
 - 解除（左右スティックの押し込み同時押し）は選択に従います。全台まとめて戻すときは
   全台選択にしてから解除してください。
 - manager は車両テレメトリを見ません。車両の状態は RViz で確認してください。
+- 全台選択で Y（自動運転）を押すとレース開始、緊急停止ボタンでレース終了を MQTT で通知します
+  （`kart_race_start` / `kart_race_finish`）。通知が失敗しても操作は止まりません。
 
-joy の中継と選択の GUI は**1つのプロセス**で動きます。GUI を開けない環境では起動しません。
+joy の中継・選択の GUI・レース通知は**1つのプロセス**で動きます。GUI を開けない環境では
+起動しません。
 
 遠隔側は常に `ROS_DOMAIN_ID=0` で動きます。車両側の domain とは無関係で、車両IDで区別します。
 全車両のトピックが `/<VEHICLE_ID>/...` の下にまとめて見えます。
@@ -113,7 +123,7 @@ python3 scripts/gui_tools.py        # Zenoh / RViz / Joy の start・stop・rest
 | ディレクトリ | 中身 |
 |---|---|
 | `manager/` | 遠隔操作ロジック。`racing_kart_manager_core.py` は ROS にも Tk にも依存せず、`tests/` は ROS を起動せず pytest だけで走ります |
-| `docs/` | 仕様。`docs/spec/joy-routing.md` が manager の正本です |
+| `docs/` | 仕様。`docs/spec/` が manager の正本です |
 | `scripts/` | 起動・接続スクリプト。`run_remote.bash` が遠隔操作一式のエントリポイントです |
 | `shared/` | **本体リポジトリからの複製。同期が必要**（下記） |
 | `rviz/` | 遠隔監視 RViz 用のアセット（地図、車体モデル、rviz 設定、launch、プラグイン） |
