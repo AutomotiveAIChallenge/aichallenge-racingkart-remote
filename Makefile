@@ -12,6 +12,10 @@ export HOST_UID HOST_GID
 # 遠隔側は常に 0 で、run_zenoh.bash も 0 に固定している。変える口は用意しない。
 unexport ROS_DOMAIN_ID
 
+# ブレーキ試験 (実験用)。指定すると B ボタンで一定ブレーキが入る。
+#   make remote VEHICLES="A3" BRAKE_TEST=20
+export BRAKE_TEST
+
 TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
 
 # 遠隔操作PC一式（zenoh ブリッジ + joy + manager）。GUI は manager と同じプロセス。
@@ -45,6 +49,7 @@ remote:
 	@echo "対象車両: $(VEHICLES)"
 	@echo "PID: $$(cat output/remote.pid) (zenoh / joy / manager)"
 	@echo "ログ: output/latest/remote/"
+	@test -z "$(BRAKE_TEST)" || echo "ブレーキ試験: $(BRAKE_TEST)% (B ボタンを押している間)"
 	@echo "状態: make ps / ログ: make logs / 停止: make remote-stop"
 
 # プロセスグループごと畳む。PID の前のマイナスがそれ。`ros2 run` は joy_node を

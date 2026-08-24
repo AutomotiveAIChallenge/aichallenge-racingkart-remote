@@ -22,6 +22,7 @@ racing_kart_manager_core の純関数が行い、このファイルは「購読�
 
 from __future__ import annotations
 
+import argparse
 import logging
 import signal
 import sys
@@ -35,10 +36,12 @@ from race_notifier import RaceNotifier, config_from_env
 from racing_kart_manager_core import (
     INITIAL_SELECTION,
     JoyValue,
+    brake_test_engaged,
     parse_vehicles,
     race_events,
     race_triggers,
     transform,
+    with_brake_test,
 )
 from racing_kart_manager_gui import ManagerWindow
 
@@ -65,10 +68,19 @@ def to_ros_joy(value: JoyValue) -> Joy:
 
 
 class RacingKartManagerNode(Node):
-    def __init__(self, vehicles: tuple[str, ...], notifier: RaceNotifier) -> None:
+    def __init__(
+        self,
+        vehicles: tuple[str, ...],
+        notifier: RaceNotifier,
+        brake_test: float | None = None,
+    ) -> None:
         super().__init__("racing_kart_manager")
 
         self.vehicles = vehicles
+
+        #: ブレーキ試験の比率 (0.0-1.0)。None なら機能そのものが無い (§11)
+        self.brake_test = brake_test
+        self._brake_engaged = False
 
         #: GUI (メインスレッド) が書き、joy のコールバック (ROS スレッド) が読む。
         #: 書き手が1つで、読み書きとも文字列1つの代入なのでロックは要らない。
@@ -101,6 +113,16 @@ class RacingKartManagerNode(Node):
         # 宛先とレース通知が食い違わない。
         selection = self.selection
 
+        engaged = brake_test_engaged(value, selection, self.vehicles, self.brake_test)
+        if engaged:
+            value = with_brake_test(value, self.brake_test)
+        if engaged != self._brake_engaged:
+            self.get_logger().info(
+                f"brake test {'engaged' if engaged else 'released'}"
+                f" ({self.brake_test * 100:g}%) on {selection}"
+            )
+            self._brake_engaged = engaged
+
         for vehicle_id, outgoing in transform(value, selection, self.vehicles).items():
             self._joy_publishers[vehicle_id].publish(to_ros_joy(outgoing))
 
@@ -110,10 +132,27 @@ class RacingKartManagerNode(Node):
         self._triggers = triggers
 
 
+def parse_arguments(argv: "list[str]") -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="遠隔操作PCの joy 中継。対象車両を1台以上、重複なしで指定する。"
+    )
+    parser.add_argument("vehicles", nargs="*", metavar="VEHICLE_ID")
+    parser.add_argument(
+        "--brake-test",
+        type=float,
+        default=None,
+        metavar="PERCENT",
+        help="実験用。B ボタンを押している間、ステアだけ自動にして一定ブレーキを入れる",
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="[%(name)s] %(message)s")
 
-    vehicles = parse_vehicles(sys.argv[1:])
+    arguments = parse_arguments(sys.argv[1:])
+
+    vehicles = parse_vehicles(arguments.vehicles)
     if vehicles is None:
         print(
             "usage: racing_kart_manager.py <VEHICLE_ID> [VEHICLE_ID ...]\n"
@@ -122,6 +161,16 @@ def main() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    brake_test = arguments.brake_test
+    if brake_test is not None:
+        if not 0.0 <= brake_test <= 100.0:
+            print(
+                f"--brake-test は 0 から 100 の間で指定してください: {brake_test}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        brake_test /= 100.0
 
     notifier = RaceNotifier(config_from_env())
 
@@ -132,7 +181,7 @@ def main() -> None:
     spinner = None
     try:
         rclpy.init()
-        node = RacingKartManagerNode(vehicles, notifier)
+        node = RacingKartManagerNode(vehicles, notifier, brake_test)
 
         # ROS は別スレッドで回す。GUI の描画や操作が joy の中継を止めないため (REQ-03)。
         # rclpy.spin は単一スレッドの executor を使う。joy のコールバックが到着順に
