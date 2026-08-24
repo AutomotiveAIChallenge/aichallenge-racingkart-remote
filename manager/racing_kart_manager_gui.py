@@ -98,6 +98,7 @@ class ManagerWindow:
         self.root = tk.Tk()
         self.root.title("racing_kart_manager")
         self.root.geometry("760x520")
+        self.root.attributes("-topmost", True)
 
         outer = ttk.Frame(self.root, padding=12)
         outer.pack(fill="both", expand=True)
