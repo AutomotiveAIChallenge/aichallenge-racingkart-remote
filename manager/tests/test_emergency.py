@@ -1,4 +1,4 @@
-"""緊急停止と解除のテスト (T-16 〜 T-24)。
+"""緊急停止と解除のテスト (T-14 〜 T-22)。
 
 仕様: docs/spec/joy-routing.md §6
 
@@ -39,8 +39,8 @@ ALL_PRESSED = (1, 1, 1, 1)
 # ==========================================================================
 
 
-def test_t16_single_selection_stops_every_vehicle():
-    """T-16: 単車選択中に緊急停止を押すと、全車の4ボタンが 1 になる (REQ-16)。"""
+def test_t14_single_selection_stops_every_vehicle():
+    """T-14: 単車選択中に緊急停止を押すと、全車の4ボタンが 1 になる (REQ-20)。"""
     joy = joy_with_buttons(EMERGENCY_BUTTONS[0], base=JOY_FULL)
 
     outgoing = transform(joy, "A3", VEHICLES)
@@ -49,8 +49,8 @@ def test_t16_single_selection_stops_every_vehicle():
         assert emergency_bits(outgoing[vehicle_id]) == ALL_PRESSED
 
 
-def test_t17_unselected_state_stops_every_vehicle():
-    """T-17: 未選択でも全車の4ボタンが 1 になる (REQ-16)。
+def test_t15_unselected_state_stops_every_vehicle():
+    """T-15: 未選択でも全車の4ボタンが 1 になる (REQ-20)。
 
     未選択は「どこにも送らない」ではない。緊急停止だけは常に全車へ届く。
     """
@@ -62,8 +62,8 @@ def test_t17_unselected_state_stops_every_vehicle():
         assert emergency_bits(outgoing[vehicle_id]) == ALL_PRESSED
 
 
-def test_t18_all_selection_stops_every_vehicle():
-    """T-18: 全台選択中も同じ (REQ-16)。"""
+def test_t16_all_selection_stops_every_vehicle():
+    """T-16: 全台選択中も同じ (REQ-20)。"""
     joy = joy_with_buttons(EMERGENCY_BUTTONS[0], base=JOY_FULL)
 
     outgoing = transform(joy, SELECTION_ALL, VEHICLES)
@@ -73,8 +73,8 @@ def test_t18_all_selection_stops_every_vehicle():
 
 
 @pytest.mark.parametrize("button", EMERGENCY_BUTTONS)
-def test_t19_each_emergency_button_works_on_its_own(button):
-    """T-19: LB / RB / START / BACK のどれ1つでも成立する (REQ-16)。
+def test_t17_each_emergency_button_works_on_its_own(button):
+    """T-17: LB / RB / START / BACK のどれ1つでも成立する (REQ-20)。
 
     driver は4つを OR で見る。どれが押されたかは区別しない。
     """
@@ -84,8 +84,8 @@ def test_t19_each_emergency_button_works_on_its_own(button):
         assert emergency_bits(outgoing[vehicle_id]) == ALL_PRESSED
 
 
-def test_t20_not_held_means_not_sent():
-    """T-20: 押されていない joy を受けたら 1 は立たない (REQ-17)。
+def test_t18_not_held_means_not_sent():
+    """T-18: 押されていない joy を受けたら 1 は立たない (REQ-21)。
 
     manager は緊急停止を保持しない。保持は車両側が行う。joy_node は押下中も
     20Hz で送り続けるので、押している限り繰り返し届く。
@@ -97,8 +97,8 @@ def test_t20_not_held_means_not_sent():
     assert emergency_bits(released["A2"]) == (0, 0, 0, 0)
 
 
-def test_t21_axes_masking_is_unchanged_while_stopping():
-    """T-21: 緊急停止中も選択車の軸は素通し、非選択車の軸は無操作値 (REQ-18)。
+def test_t19_axes_masking_is_unchanged_while_stopping():
+    """T-19: 緊急停止中も選択車の軸は素通し、非選択車の軸は無操作値 (REQ-22)。
 
     車両側は緊急停止がラッチしている間、軸を見ずに停止指令を出す。
     ここで軸を触らないのは、緊急停止の有無でマスクの規則を変えないため。
@@ -116,9 +116,9 @@ def test_t21_axes_masking_is_unchanged_while_stopping():
 # ==========================================================================
 
 
-def test_t22_malformed_joy_masks_everyone_but_still_carries_the_stop():
-    """T-22: 要素数が規定と異なる joy では全車が非選択車扱いになり、
-    読み取れた緊急停止ボタンは反映される (REQ-14)。
+def test_t20_malformed_joy_masks_everyone_but_still_carries_the_stop():
+    """T-20: 要素数が規定と異なる joy では全車が非選択車扱いになり、
+    読み取れた緊急停止ボタンは反映される (REQ-18)。
 
     壊れた入力で操縦させない。ただし壊れていても緊急停止だけは通す。
     正規化せずに素通しすると、driver が joy ごと捨てるので緊急停止も届かない。
@@ -134,8 +134,8 @@ def test_t22_malformed_joy_masks_everyone_but_still_carries_the_stop():
         assert emergency_bits(outgoing[vehicle_id]) == ALL_PRESSED
 
 
-def test_t22b_malformed_joy_without_a_stop_is_just_idle():
-    """T-22: 緊急停止が読み取れない壊れた入力では、全車が無操作 joy を受ける。"""
+def test_t20b_malformed_joy_without_a_stop_is_just_idle():
+    """T-20: 緊急停止が読み取れない壊れた入力では、全車が無操作 joy を受ける。"""
     short = JoyValue(axes=(), buttons=(0, 0))
 
     outgoing = transform(short, "A3", VEHICLES)
@@ -150,8 +150,8 @@ def test_t22b_malformed_joy_without_a_stop_is_just_idle():
 # ==========================================================================
 
 
-def test_t23_clear_reaches_the_selected_vehicle_only():
-    """T-23: LSB+RSB は選択車にだけ届く (REQ-19)。
+def test_t21_clear_reaches_the_selected_vehicle_only():
+    """T-21: LSB+RSB は選択車にだけ届く (REQ-23)。
 
     停止は全台・解除は選択、という非対称。1台ずつ戻すときは選択を切り替えながら
     解除する。
@@ -167,8 +167,8 @@ def test_t23_clear_reaches_the_selected_vehicle_only():
         assert outgoing[vehicle_id].buttons[BUTTON_RSB] == 0
 
 
-def test_t24_clear_reaches_everyone_when_all_are_selected():
-    """T-24: 全台選択中は全車に届く (REQ-19)。
+def test_t22_clear_reaches_everyone_when_all_are_selected():
+    """T-22: 全台選択中は全車に届く (REQ-23)。
 
     全台に配った緊急停止を一度に戻すときの標準手順。
     """
@@ -181,8 +181,8 @@ def test_t24_clear_reaches_everyone_when_all_are_selected():
         assert outgoing[vehicle_id].buttons[BUTTON_RSB] == 1
 
 
-def test_t24b_clear_does_not_reach_anyone_while_unselected():
-    """T-24: 未選択のときは解除がどこにも届かない (REQ-19)。"""
+def test_t22b_clear_does_not_reach_anyone_while_unselected():
+    """T-22: 未選択のときは解除がどこにも届かない (REQ-23)。"""
     joy = joy_with_buttons(BUTTON_LSB, BUTTON_RSB)
 
     outgoing = transform(joy, SELECTION_NONE, VEHICLES)

@@ -18,7 +18,7 @@ endif
 TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
 LOG_DIR := /output/$(TIMESTAMP)
 
-# 遠隔操作PC一式（zenoh ブリッジ + joy + manager + 操作GUI）
+# 遠隔操作PC一式（zenoh ブリッジ + joy + manager）。GUI は manager と同じプロセス。
 #   make remote VEHICLES="A2 A3 A7"
 # 対象車両に既定値を置かない。GUI の「全台」も緊急停止の宛先もここで決まるため。
 # 遠隔側は常に ROS_DOMAIN_ID 0。車両側の domain とは無関係で、車両IDで区別する。
@@ -47,7 +47,7 @@ remote:
 	@setsid ./scripts/run_remote.bash "$(VEHICLES)" "$(PWD)/output/$(TIMESTAMP)" \
 		</dev/null >/dev/null 2>&1 & echo $$! > output/remote.pid
 	@echo "対象車両: $(VEHICLES)"
-	@echo "PID: $$(cat output/remote.pid) (zenoh / joy / manager / GUI)"
+	@echo "PID: $$(cat output/remote.pid) (zenoh / joy / manager)"
 	@echo "ログ: output/latest/remote/"
 	@echo "状態: make ps / ログ: make logs / 停止: make remote-stop"
 

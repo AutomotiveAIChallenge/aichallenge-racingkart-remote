@@ -27,7 +27,7 @@ sudo apt install ros-humble-ros-base ros-humble-joy python3-tk
 sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb
 ```
 
-manager が使うのは `rclpy` + `sensor_msgs` + `std_msgs` だけです。Autoware も
+manager が使うのは `rclpy` + `sensor_msgs` だけです。Autoware も
 `racing_kart_msgs` も要りません。`ros-humble-desktop` が既に入っていればそれで足ります。
 
 ### リポジトリ側
@@ -54,7 +54,7 @@ make remote-stop                   # 停止
 ```
 
 `make remote` は `scripts/run_remote.bash` を `setsid` で起こし、そこから zenoh ブリッジ
-（車両1台につき1プロセス）・joy・manager・操作GUI を起動します。`setsid` で端末から
+（車両1台につき1プロセス）・joy・manager を起動します。`setsid` で端末から
 切り離すので make が返っても生き残ります。
 
 PID は `output/remote.pid` の1つだけです。`setsid` によって `run_remote.bash` が
@@ -64,8 +64,7 @@ PID は `output/remote.pid` の1つだけです。`setsid` によって `run_rem
 プロセスがあれば `make remote-stop` が警告します。
 
 ログは `output/<timestamp>/remote/` に `zenoh-<VEHICLE_ID>.log` / `joy.log` /
-`manager.log` / `manager-gui.log` として並びます。`output/latest/remote` が最新の
-ディレクトリを指します。
+`manager.log` として並びます。`output/latest/remote` が最新のディレクトリを指します。
 
 **子が落ちても上げ直しません。** 黙って復活すると不安定なまま運用を続けてしまうためです。
 何が生きているかは `make ps` で見てください。zenoh ブリッジの再接続だけは
@@ -84,6 +83,8 @@ manager の仕様は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md) に�
 - 解除（左右スティックの押し込み同時押し）は選択に従います。全台まとめて戻すときは
   全台選択にしてから解除してください。
 - manager は車両テレメトリを見ません。車両の状態は RViz で確認してください。
+
+joy の中継と選択の GUI は**1つのプロセス**で動きます。GUI を開けない環境では起動しません。
 
 遠隔側は常に `ROS_DOMAIN_ID=0` で動きます。車両側の domain とは無関係で、車両IDで区別します。
 全車両のトピックが `/<VEHICLE_ID>/...` の下にまとめて見えます。
@@ -111,7 +112,7 @@ python3 scripts/gui_tools.py        # Zenoh / RViz / Joy の start・stop・rest
 
 | ディレクトリ | 中身 |
 |---|---|
-| `manager/` | 遠隔操作ロジック。`racing_kart_manager_core.py` は ROS 非依存で、`tests/` は ROS を起動せず pytest だけで走ります |
+| `manager/` | 遠隔操作ロジック。`racing_kart_manager_core.py` は ROS にも Tk にも依存せず、`tests/` は ROS を起動せず pytest だけで走ります |
 | `docs/` | 仕様。`docs/spec/joy-routing.md` が manager の正本です |
 | `scripts/` | 起動・接続スクリプト。`run_remote.bash` が遠隔操作一式のエントリポイントです |
 | `shared/` | **本体リポジトリからの複製。同期が必要**（下記） |

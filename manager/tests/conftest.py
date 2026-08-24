@@ -5,7 +5,7 @@ racing_kart_manager_core は ROS に依存しないので、このテスト群�
 
     uv run --with pytest pytest manager/tests -q
 
-仕様: docs/spec/joy-routing.md
+仕様: docs/spec/joy-routing.md, docs/spec/race-notification.md
 """
 
 from __future__ import annotations
