@@ -59,8 +59,12 @@ make remote-stop                   # 停止
 ```
 
 `make remote` は `scripts/run_remote.bash` を `setsid` で起こし、そこから zenoh ブリッジ
-（車両1台につき1プロセス）・joy・manager を起動します。`.env` を読むのもここです。
-`setsid` で端末から切り離すので make が返っても生き残ります。
+（車両1台につき1プロセス）・joy・manager を起動します。`setsid` で端末から切り離すので
+make が返っても生き残ります。
+
+起動の前段（`.env` の読み込み・ROS 環境・`ROS_DOMAIN_ID`・ログ先）は
+`scripts/remote_component.bash` が持っています。`run_remote.bash` はそれを3回呼ぶだけで、
+ランチャGUI も同じものを1回ずつ呼びます。前段が2箇所にあると、いずれ片方だけが直るためです。
 
 PID は `output/remote.pid` の1つだけです。`setsid` によって `run_remote.bash` が
 セッションリーダーになり、**子も孫も同じプロセスグループに入ります**。`make remote-stop`
@@ -126,24 +130,52 @@ make rviz              # 地図だけ表示
 make rviz-stop
 ```
 
-### ランチャGUI（1台ずつ手元で操作する場合）
+### ランチャGUI（zenoh / joy / manager を個別に操作する）
 
 ```bash
-python3 scripts/gui_tools.py        # Zenoh / RViz / Joy の start・stop・restart
-./scripts/connect_zenoh.bash A3     # 単一車両に zenoh 接続（ホスト実行）
+python3 scripts/remote_launcher.py
+```
+
+`make remote` が3つをまとめて起こしてまとめて畳むのに対し、ランチャは同じ3つを
+**個別に**起こして畳みます。zenoh だけ繋ぎ直す、manager だけ入れ替える、といった
+運用中の操作に使います。起動には `make remote` と同じ `scripts/remote_component.bash`
+を使うので、CLI と GUI で挙動が割れません。
+
+**`make remote` と同時には使えません。** joy が二重に流れるため、`output/remote.pid` が
+生きているとランチャは起動を拒否します。逆にランチャから起こしたものは
+`output/launcher-<名前>.pid` に出るので、`make ps` から見えます。
+
+停止・再起動には確認が入ります。zenoh・joy・manager のどれを止めても joy の配信が
+5秒途切れ、車両側が緊急停止をラッチするためです（解除は左右スティックの同時押し込み）。
+
+対象車両は A2 / A3 / A6 / A7 です。**何か1つでも起動している間は変更できません。**
+manager は対象車両を起動引数で確定し、zenoh は車両ごとに1プロセスを持つので、走行中に
+集合を変えると両者がズレます。ここで選んだ集合がそのまま manager の「全台」であり
+緊急停止の宛先なので、走行させる車両はすべてチェックしてください。
+
+ログは `make remote` と同じ `output/latest/remote/` に出て、GUI はそれを追尾するだけです。
+RViz は扱いません（`make rviz VEHICLE=A3`）。仕様は
+[`docs/spec/launcher.md`](docs/spec/launcher.md) にあります。
+
+### 単車を手で扱う
+
+```bash
+./scripts/connect_zenoh.bash A3     # 1台に zenoh 接続（再接続なし）
+./scripts/rviz.bash                 # RViz だけ起動（地図のみ）
+./scripts/restart.bash A3           # RViz を上げ直して A3 に繋ぎ直す
 ```
 
 `make remote` が複数台をまとめて扱う（`run_zenoh.bash`、再接続あり）のに対し、
-`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。RViz は GUI からでも
-`make rviz` 経由で Docker で起動します。
+`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。`rviz.bash` は VEHICLE を
+渡せないので地図しか出ません。車両を映すなら `make rviz VEHICLE=A3` を使ってください。
 
 ## ディレクトリ構成
 
 | ディレクトリ | 中身 |
 |---|---|
 | `manager/` | 遠隔操作ロジック。`racing_kart_manager_core.py` は ROS にも Tk にも依存せず、`tests/` は ROS を起動せず pytest だけで走ります |
-| `docs/` | 仕様。`docs/spec/` が manager の正本です |
-| `scripts/` | 起動・接続スクリプト。`run_remote.bash` が遠隔操作一式のエントリポイントです |
+| `docs/` | 仕様。`docs/spec/` が manager とランチャの正本です |
+| `scripts/` | 起動・接続スクリプトとランチャGUI。`remote_component.bash` が構成要素1つ分の起動を、`run_remote.bash` が一式の起動を担います |
 | `shared/` | **本体リポジトリからの複製。同期が必要**（下記） |
 | `rviz/` | 遠隔監視 RViz 用のアセット（地図、車体モデル、rviz 設定、launch、プラグイン） |
 | `vendor/` | zenoh-bridge-ros2dds の deb |
