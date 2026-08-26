@@ -285,6 +285,115 @@ def race_payload(event: str, stamp_ns: int) -> str:
 
 
 # --------------------------------------------------------------------------
+# 一斉指令
+#
+# GUI の「レース開始」「レース終了」ボタン。選択に関係なく対象車両の全部へ、
+# control_mode を変えるボタンを重ねて送る。
+#
+# 仕様: docs/spec/joy-routing.md §4.3
+# --------------------------------------------------------------------------
+
+#: 全車自動走行へ (Y)
+COMMAND_RACE_START = "race_start"
+
+#: 全車ステアのみ自動へ (X)
+COMMAND_RACE_FINISH = "race_finish"
+
+#: 一斉指令と、それに伴って出すレース通知の対応 (RN-16)。
+#: ボタンの名前がレースの開始・終了そのものなので、指令と通知は必ず対で出る。
+COMMAND_EVENTS: dict[str, str] = {
+    COMMAND_RACE_START: RACE_START,
+    COMMAND_RACE_FINISH: RACE_FINISH,
+}
+
+#: 1回の押下で、連続する何個の joy に重ねるか (REQ-33)。
+#: 車両側の control_mode は1フレーム届けばラッチするが、joy の QoS は depth 1 で、
+#: 無線の取りこぼしでその1フレームが落ちるとボタンが効かなかったように見える。
+#: joy_node は 20Hz なので 10 でおよそ0.5秒。
+COMMAND_REPEAT = 10
+
+
+@dataclass(frozen=True)
+class CommandState:
+    """一斉指令の残り。ROS の実行スレッドの中だけで読み書きする。"""
+
+    command: Optional[str] = None
+    remaining: int = 0
+
+
+@dataclass(frozen=True)
+class CommandStep:
+    """joy 1つ分の結論。"""
+
+    #: 次の joy へ持ち越す状態
+    state: CommandState
+
+    #: この joy に重ねる指令。重ねないなら None
+    overlay: Optional[str]
+
+    #: この joy でレース通知を出すか
+    notify: bool
+
+
+def advance_command(state: CommandState, requested: Optional[str]) -> CommandStep:
+    """joy を1つ処理するときの一斉指令の進み方 (REQ-33, REQ-34, RN-16)。
+
+    `requested` は、この joy を処理する直前に GUI から届いた指令 (無ければ None)。
+    繰り返しの途中で新しい指令が来たら、あとの指令で置き換えて数え直す (REQ-34)。
+
+    通知を出すのは受け付けた最初の1回だけ。繰り返しの各フレームで出すと、1回の押下で
+    同じ時刻の通知が10回飛ぶ (RN-16)。
+    """
+    if requested is not None:
+        state = CommandState(command=requested, remaining=COMMAND_REPEAT)
+
+    if state.remaining <= 0:
+        return CommandStep(state=CommandState(), overlay=None, notify=False)
+
+    return CommandStep(
+        state=CommandState(command=state.command, remaining=state.remaining - 1),
+        overlay=state.command,
+        notify=requested is not None,
+    )
+
+
+def with_command(joy: JoyValue, command: str) -> JoyValue:
+    """一斉指令を1台分の joy に重ねる (REQ-31)。
+
+    緊急停止の4ボタンとその解除には触れない。緊急停止中でも指令は重なる (REQ-35)。
+    """
+    axes = list(joy.axes)
+    buttons = list(joy.buttons)
+
+    if command == COMMAND_RACE_START:
+        buttons[BUTTON_Y] = 1
+    elif command == COMMAND_RACE_FINISH:
+        buttons[BUTTON_X] = 1
+        # AUTONOMOUS_STEER_ONLY ではアクセルが joy 側に移る。トリガーを踏んだまま
+        # レースを終えると、自動操舵のままスロットルが入る。
+        axes[AXIS_ACCEL] = NO_INPUT_AXES[AXIS_ACCEL]
+    else:
+        raise ValueError(f"unknown command: {command}")
+
+    return JoyValue(axes=tuple(axes), buttons=tuple(buttons), stamp_ns=joy.stamp_ns)
+
+
+def apply_command(
+    outgoing: dict[str, JoyValue], command: Optional[str]
+) -> dict[str, JoyValue]:
+    """transform が作った送出先ごとの joy に、一斉指令を重ねる (REQ-30)。
+
+    選択は問わない。非選択車にも届く。要素数が規定と異なる joy を受け取ったフレームでも
+    届く (REQ-36)。指令の出どころは GUI であり、joy の壊れ方とは無関係である。
+    """
+    if command is None:
+        return outgoing
+    return {
+        vehicle_id: with_command(joy, command) for vehicle_id, joy in outgoing.items()
+    }
+
+
+# --------------------------------------------------------------------------
 # 実験用: ブレーキ試験
 #
 # 仕様: docs/spec/joy-routing.md §11
