@@ -27,21 +27,14 @@ TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
 # 返っても生き残る。setsid によって run_remote.bash がセッションリーダーになり、
 # 子も孫も同じプロセスグループに入る。停止はそのグループごと畳む (remote-stop)。
 # ホストに ROS 2 Humble と zenoh-bridge-ros2dds が入っていること (README 参照)。
+# 前提の確認は remote_component.bash check が持つ。Makefile・ランチャ GUI・起動時の
+# 3者が同じものを呼ぶので、確認の内容が散らばらない。
 remote:
 	@test -n "$(VEHICLES)" || { \
 		echo 'Error: VEHICLES を指定してください。  例: make remote VEHICLES="A2 A3 A7"' >&2; \
 		exit 1; \
 	}
-	@test -f /opt/ros/humble/setup.bash || { \
-		echo 'Error: ROS 2 Humble が見つかりません (/opt/ros/humble)。' >&2; \
-		echo '       sudo apt install ros-humble-ros-base ros-humble-joy python3-tk' >&2; \
-		exit 1; \
-	}
-	@command -v zenoh-bridge-ros2dds >/dev/null || { \
-		echo 'Error: zenoh-bridge-ros2dds が見つかりません。' >&2; \
-		echo '       sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb' >&2; \
-		exit 1; \
-	}
+	@./scripts/remote_component.bash check
 	@mkdir -p output/$(TIMESTAMP)/remote output/latest
 	@ln -sfn "$(PWD)/output/$(TIMESTAMP)/remote" output/latest/remote
 	@setsid ./scripts/run_remote.bash "$(VEHICLES)" "$(PWD)/output/$(TIMESTAMP)" \
@@ -92,6 +85,7 @@ down:
 	docker compose down --remove-orphans
 
 # ホスト側はプロセスグループの中身をそのまま出す。コンテナは RViz だけ。
+# ランチャ GUI から起こしたものは構成要素ごとに pid ファイルを置くので、そちらも出す。
 ps:
 	@pid=$$(cat output/remote.pid 2>/dev/null); \
 	if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
@@ -100,6 +94,17 @@ ps:
 	else \
 		echo "remote: down"; \
 	fi
+	@for f in output/launcher-*.pid; do \
+		[ -e "$$f" ] || continue; \
+		name=$$(basename "$$f" .pid | sed 's/^launcher-//'); \
+		pid=$$(cat "$$f" 2>/dev/null); \
+		if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+			echo "launcher/$$name: up (PID group $$pid)"; \
+			pgrep -g "$$pid" -a | sed 's/^/  /'; \
+		else \
+			echo "launcher/$$name: down (残った pid ファイル: $$f)"; \
+		fi; \
+	done
 	@echo
 	@docker compose ps
 
