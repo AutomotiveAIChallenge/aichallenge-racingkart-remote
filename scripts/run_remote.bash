@@ -57,6 +57,18 @@ fi
 # 子はここから継承する。
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 
+# DDS 実装も遠隔側で固定する。zenoh-bridge-ros2dds が CycloneDDS 実装なので、joy や
+# manager が既定の fastrtps で上がると RMW が食い違い、同じ domain にいても discovery が
+# 噛み合わず互いのノードが見えない。RViz も同じ理由で合わせてある (docker-compose.yml)。
+#
+# cyclonedds.xml は interface を lo に固定する。autodetermine のままだと NIC 側を選び、
+# lo を向いている相手と割れる。RViz コンテナは network_mode: host で同じファイルを読む。
+#
+# ホストシェルの設定に依存させたくないので、ROS_DOMAIN_ID と違って上書きの口は作らない。
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+repo_root="$(cd "${script_dir}/.." && pwd)"
+export CYCLONEDDS_URI="file://${repo_root}/shared/cyclonedds.xml"
+
 mkdir -p "${out_dir}"
 
 start() {

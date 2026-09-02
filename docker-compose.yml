@@ -28,6 +28,13 @@ services:
       - HOST_UID=${HOST_UID:-}
       - HOST_GID=${HOST_GID:-}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      # ホスト側 (make remote の zenoh ブリッジ・joy・manager) は CycloneDDS で動く。
+      # zenoh-bridge-ros2dds 自体が CycloneDDS 実装なので、こちらも合わせないと
+      # RMW が食い違って互いのノードが見えず、RViz に何も映らない。
+      # cyclonedds.xml は interface を lo に固定する。network_mode: host なので
+      # ホスト側と同じ lo に乗る。autodetermine のままだと NIC 側を選んで噛み合わない。
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///shared/cyclonedds.xml
     volumes:
       - ./output:${OUTPUT_ROOT:-/output}
       - ./scripts:/scripts
