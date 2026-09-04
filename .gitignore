@@ -17,7 +17,5 @@ __pycache__/
 /CLAUDE.md
 /MEMORY.md
 
-# コアダンプ。RViz コンテナは working_dir が /scripts (= ./scripts のバインドマウント) な
-# ので、rviz2 が落ちるとホストの scripts/ に数百MBのコアが降ってくる。
 core
 core.*
