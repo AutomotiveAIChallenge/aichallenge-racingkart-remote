@@ -93,7 +93,7 @@ class RacingKartManagerNode(Node):
         self._triggers = None
 
         self._joy_publishers = {
-            vehicle_id: self.create_publisher(Joy, f"/{vehicle_id}/racing_kart/joy", 1)
+            vehicle_id: self.create_publisher(Joy, f"/{vehicle_id}/racing_kart/sd/joy", 1)
             for vehicle_id in vehicles
         }
 

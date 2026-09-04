@@ -120,9 +120,9 @@ manager の設計は `racing_kart_driver` の次の挙動に依存する。
 | 向き | topic | 型 | QoS |
 | --- | --- | --- | --- |
 | 購読 | `/racing_kart/joy` | `sensor_msgs/Joy` | depth 1 |
-| 配信 | `/<VEHICLE_ID>/racing_kart/joy` | `sensor_msgs/Joy` | depth 1 |
+| 配信 | `/<VEHICLE_ID>/racing_kart/sd/joy` | `sensor_msgs/Joy` | depth 1 |
 
-`/<VEHICLE_ID>/racing_kart/joy` は zenoh ブリッジが車両側の `/racing_kart/joy` へ届ける。
+`/<VEHICLE_ID>/racing_kart/sd/joy` は zenoh ブリッジが車両側の `/racing_kart/sd/joy` へ届ける。
 車両IDの名前空間を付けるのは manager の役目である。
 
 - **REQ-24** 依存するメッセージパッケージは `sensor_msgs` だけとする。

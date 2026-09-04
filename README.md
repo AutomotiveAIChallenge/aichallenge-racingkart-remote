@@ -156,7 +156,6 @@ python3 scripts/gui_tools.py        # Zenoh / RViz / Joy の start・stop・rest
 | ファイル | 本体側の正本 |
 |---|---|
 | `shared/vehicle_ports.sh` | `vehicle/vehicle_ports.sh` |
-| `shared/zenoh.json5` | `vehicle/zenoh.json5` |
 | `shared/zenoh-user.json5.template` | `remote/zenoh-user.json5.template` |
 
 車両を追加するとき、zenoh の許可リストを変えるときは、必ず両方のリポジトリを揃えてください。

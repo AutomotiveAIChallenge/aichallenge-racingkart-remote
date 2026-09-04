@@ -24,7 +24,7 @@ vehicle_id="${1-}"
 # なしの名前なので中継して噛み合わせる。
 #
 # 中継先を列挙しているのは意図的。/<VEHICLE_ID>/* を丸ごと中継すると、車両から返ってくる
-# /<VEHICLE_ID>/racing_kart/joy がローカルの /racing_kart/joy に流れ込み、manager が
+# /<VEHICLE_ID>/racing_kart/sd/joy がローカルの /racing_kart/joy に流れ込み、manager が
 # 自分の出したジョイスティック入力のエコーを掴む。
 #
 # /tf_static は入れない。base_link 配下は remote.launch.xml の robot_state_publisher が、
