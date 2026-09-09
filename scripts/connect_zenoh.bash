@@ -2,13 +2,13 @@
 # 遠隔操作PC側の zenoh ブリッジを1台分だけ起動する。
 #
 #   connect_zenoh.bash {A1|A2|A3|A5|A6|A7|A8}
-#   connect_zenoh.bash {test-remote|test-vehicle|test-server}
+#   connect_zenoh.bash {test-remote|test-server}
 #
 # 複数台をまとめて起動するときは make remote (compose の zenoh-remote サービス、
 # remote/run_zenoh.bash) を使う。こちらは1台だけ手で試すための道具。
 #
 # 設定は remote/zenoh-user.json5.template から車両ごとに生成する。許可リストは車両側の
-# shared/zenoh.json5 と揃えること。片側だけ直すと値が遠隔PCへ届かず、しかも自動テストでは
+# 本体 vehicle/zenoh.json5 と揃えること。片側だけ直すと値が遠隔PCへ届かず、しかも自動テストでは
 # 検出できない。
 
 set -eo pipefail
@@ -36,7 +36,7 @@ render_config() {
 
 if [ "$#" -ne 1 ]; then
     echo "エラー: Vehicle ID を指定してください。" >&2
-    echo "使用法: $0 {A1|A2|A3|A5|A6|A7|A8|test-remote|test-vehicle|test-server}" >&2
+    echo "使用法: $0 {A1|A2|A3|A5|A6|A7|A8|test-remote|test-server}" >&2
     exit 1
 fi
 
@@ -48,12 +48,6 @@ test-remote)
     echo "Connecting Zenoh. Target Vehicle: 'local' - Endpoint ${ENDPOINT}"
     config="$(render_config A2)"
     exec env RUST_BACKTRACE=1 zenoh-bridge-ros2dds client -e "${ENDPOINT}" -c "${config}"
-    ;;
-test-vehicle)
-    ENDPOINT="${ZENOH_LOCAL_ENDPOINT:-tcp/127.0.0.1:7448}"
-    echo "Connecting Zenoh. Target Vehicle: 'local' - Endpoint ${ENDPOINT}"
-    exec env RUST_BACKTRACE=1 zenoh-bridge-ros2dds client \
-        -e "${ENDPOINT}" -n /A2 -c "${SCRIPT_DIR}/../shared/zenoh.json5"
     ;;
 test-server)
     exec zenohd --listen tcp/127.0.0.1:7448

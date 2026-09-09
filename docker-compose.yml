@@ -28,6 +28,8 @@ services:
       - HOST_UID=${HOST_UID:-}
       - HOST_GID=${HOST_GID:-}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///shared/cyclonedds.xml
     volumes:
       - ./output:${OUTPUT_ROOT:-/output}
       - ./scripts:/scripts

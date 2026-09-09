@@ -16,3 +16,6 @@ __pycache__/
 .claude
 /CLAUDE.md
 /MEMORY.md
+
+core
+core.*

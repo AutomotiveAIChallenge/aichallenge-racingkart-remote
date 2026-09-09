@@ -56,6 +56,9 @@ fi
 # 遠隔側は常に domain 0。車両側の domain とは無関係で、車両IDで区別する。
 # 子はここから継承する。
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+repo_root="$(cd "${script_dir}/.." && pwd)"
+export CYCLONEDDS_URI="file://${repo_root}/shared/cyclonedds.xml"
 
 mkdir -p "${out_dir}"
 
