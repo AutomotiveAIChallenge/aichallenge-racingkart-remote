@@ -94,7 +94,6 @@ down:
 	docker compose down --remove-orphans
 
 # ホスト側はプロセスグループの中身をそのまま出す。コンテナは RViz だけ。
-# ランチャ GUI から起こしたものは構成要素ごとに pid ファイルを置くので、そちらも出す。
 ps:
 	@pid=$$(cat output/remote.pid 2>/dev/null); \
 	if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
@@ -103,17 +102,6 @@ ps:
 	else \
 		echo "remote: down"; \
 	fi
-	@for f in output/launcher-*.pid; do \
-		[ -e "$$f" ] || continue; \
-		name=$$(basename "$$f" .pid | sed 's/^launcher-//'); \
-		pid=$$(cat "$$f" 2>/dev/null); \
-		if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
-			echo "launcher/$$name: up (PID group $$pid)"; \
-			pgrep -g "$$pid" -a | sed 's/^/  /'; \
-		else \
-			echo "launcher/$$name: down (残った pid ファイル: $$f)"; \
-		fi; \
-	done
 	@echo
 	@docker compose ps
 

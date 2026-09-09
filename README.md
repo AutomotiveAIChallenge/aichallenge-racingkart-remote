@@ -130,31 +130,22 @@ make rviz              # 地図だけ表示
 make rviz-stop
 ```
 
-### ランチャGUI（zenoh / joy / manager を個別に操作する）
+### ランチャGUI（Zenoh / RViz / Joy / Manager を個別に操作する）
 
 ```bash
 python3 scripts/remote_launcher.py
 ```
 
-`make remote` が3つをまとめて起こしてまとめて畳むのに対し、ランチャは同じ3つを
-**個別に**起こして畳みます。zenoh だけ繋ぎ直す、manager だけ入れ替える、といった
-運用中の操作に使います。起動には `make remote` と同じ `scripts/remote_component.bash`
-を使うので、CLI と GUI で挙動が割れません。
+本体リポジトリの `remote/gui_tools.py` と同じGUIに Manager の列とログを加えたものです。
+上部で Vehicle ID を選び、各コンポーネントを個別に起動・停止・再起動できます。
+Manager は共通起動前段を通すため、`.env`、ROS 2、CycloneDDS設定も読み込まれます。
 
-**`make remote` と同時には使えません。** joy が二重に流れるため、`output/remote.pid` が
-生きているとランチャは起動を拒否します。逆にランチャから起こしたものは
-`output/launcher-<名前>.pid` に出るので、`make ps` から見えます。
+プロセスは専用グループで起動され、停止は SIGTERM から SIGKILL へ段階的に進みます。
+Restart は停止完了を待ってから起動します。ログが大量に流れてもGUIを固めないよう、
+有界キューと描画時間の上限も設けています。
 
-停止・再起動には確認が入ります。zenoh・joy・manager のどれを止めても joy の配信が
-5秒途切れ、車両側が緊急停止をラッチするためです（解除は左右スティックの同時押し込み）。
-
-対象車両は A2 / A3 / A6 / A7 です。**何か1つでも起動している間は変更できません。**
-manager は対象車両を起動引数で確定し、zenoh は車両ごとに1プロセスを持つので、走行中に
-集合を変えると両者がズレます。ここで選んだ集合がそのまま manager の「全台」であり
-緊急停止の宛先なので、走行させる車両はすべてチェックしてください。
-
-ログは `make remote` と同じ `output/latest/remote/` に出て、GUI はそれを追尾するだけです。
-RViz は扱いません（`make rviz VEHICLE=A3`）。仕様は
+**`make remote` と同時には使わないでください。** JoyやManagerが二重起動します。
+先に `make remote-stop` で一括起動側を止めてください。詳しい仕様は
 [`docs/spec/launcher.md`](docs/spec/launcher.md) にあります。
 
 ### 単車を手で扱う

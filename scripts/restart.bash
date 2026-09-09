@@ -3,7 +3,7 @@
 #
 #   restart.bash {A1|A2|A3|A5|A6|A7|A8|test-*}
 #
-# 単車を手で扱うための道具で、ランチャ (remote_launcher.py) からは呼ばれない。
+# 単車を手で扱うための道具で、ランチャの Restart Zenoh and RViz からも呼ばれる。
 # 複数台をまとめて扱うときは make remote を使う。
 set -euo pipefail
 

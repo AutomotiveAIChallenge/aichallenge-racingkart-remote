@@ -14,9 +14,8 @@
 # make remote (run_remote.bash) もランチャ GUI も同じこれを呼ぶ (LN-02, LN-13)。前段が
 # 2箇所にあると、いずれ片方だけが直る。
 #
-# 出力はすべて <LOG_DIR>/remote/<name>.log に入る。check の失敗も含めて例外を作らない
-# (LN-15)。端末に出るか出ないかを呼び出し側ごとに変えると、GUI から起こしたときだけ
-# 失敗の理由が消える。
+# 通常は出力をすべて <LOG_DIR>/remote/<name>.log に入れる。旧 GUI と同じパイプ式の
+# ランチャから呼ぶ場合だけ REMOTE_COMPONENT_STDIO=1 とし、呼び出し元に出力を渡す。
 #
 # 仕様: docs/spec/launcher.md
 set -eo pipefail
@@ -134,8 +133,10 @@ shift
 out_dir="${log_dir}/remote"
 mkdir -p "${out_dir}"
 
-# ここから先の出力はすべてログへ (LN-15)。
-exec >>"${out_dir}/${component}.log" 2>&1
+# ここから先の出力は通常ログへ。GUI は自分のログペインへ流すのでリダイレクトしない。
+if [ "${REMOTE_COMPONENT_STDIO:-0}" != "1" ]; then
+    exec >>"${out_dir}/${component}.log" 2>&1
+fi
 echo "[remote_component] $(date '+%Y-%m-%d %H:%M:%S') starting ${component}"
 
 load_env
