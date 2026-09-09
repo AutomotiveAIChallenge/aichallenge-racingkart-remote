@@ -153,11 +153,6 @@ def emergency_pressed(joy: JoyValue) -> bool:
     return any(_pressed(joy, index) for index in EMERGENCY_BUTTONS)
 
 
-def autonomous_pressed(joy: JoyValue) -> bool:
-    """自動運転 (Y) が押されているか。X は含めない (RN-04)。"""
-    return _pressed(joy, BUTTON_Y)
-
-
 def _with_emergency(joy: JoyValue) -> JoyValue:
     """緊急停止ボタン4つすべてを立てた joy。"""
     buttons = list(joy.buttons)
@@ -215,54 +210,6 @@ TOPIC_RACE_FINISH = "kart_race_finish"
 JST = timezone(timedelta(hours=9))
 
 
-@dataclass(frozen=True)
-class RaceTriggers:
-    """ある1つの joy から見た、2つの発火条件の成否。"""
-
-    start: bool
-    finish: bool
-
-
-def race_triggers(joy: JoyValue, selection: str) -> RaceTriggers:
-    """発火条件を評価する。条件は互いに独立に見る (RN-07)。
-
-    開始は transform が操縦を許す joy のときだけ見る (RN-10)。要素数が規定と違う入力は
-    どの車両も操縦できない (REQ-18) のに、ボタン配列の違う機器の index 3 が偶然立って
-    レース開始が飛び、retain された started_at を上書きする、というのを防ぐ。
-    終了は要素数を問わない。壊れていても止めるほうは通す。
-    """
-    return RaceTriggers(
-        start=(
-            joy_is_well_formed(joy)
-            and selection == SELECTION_ALL
-            and autonomous_pressed(joy)
-        ),
-        finish=emergency_pressed(joy),
-    )
-
-
-def race_events(
-    previous: Optional[RaceTriggers], current: RaceTriggers
-) -> tuple[str, ...]:
-    """立ち上がったものだけを返す (RN-05)。
-
-    joy_node は押下中も 20Hz で送り続けるため、押されているかどうかだけで判定すると
-    1回の押下で連続送信になる。
-
-    previous が None のときは何も返さない (RN-08)。ボタンを押したまま起動したときに、
-    押した覚えのない通知が飛ぶのを防ぐ。
-    """
-    if previous is None:
-        return ()
-
-    events = []
-    if current.start and not previous.start:
-        events.append(RACE_START)
-    if current.finish and not previous.finish:
-        events.append(RACE_FINISH)
-    return tuple(events)
-
-
 def race_topic(event: str) -> str:
     return TOPIC_RACE_START if event == RACE_START else TOPIC_RACE_FINISH
 
@@ -279,7 +226,7 @@ def to_jst_iso8601(stamp_ns: int) -> str:
 
 
 def race_payload(event: str, stamp_ns: int) -> str:
-    """通知のペイロード。時刻は joy の header.stamp から作る (RN-09)。"""
+    """通知のペイロード。時刻は一斉指令を最初に乗せた joy から作る (RN-17)。"""
     field = "started_at" if event == RACE_START else "finished_at"
     return json.dumps({field: to_jst_iso8601(stamp_ns)})
 

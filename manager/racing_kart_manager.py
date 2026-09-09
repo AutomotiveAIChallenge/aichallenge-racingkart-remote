@@ -8,7 +8,7 @@ racing_kart_manager_core の純関数が行い、このファイルは「購読�
 スレッドは3つ。
 
     メイン        Tk の mainloop、ボタン、100ms の再描画
-    ROS 実行      joy の受信・変換・publish・レース通知の立ち上がり判定
+    ROS 実行      joy の受信・変換・publish・GUI 一斉指令の処理
     race_notifier mosquitto_pub の起動と再試行
 
 守る約束は4つ。
@@ -44,8 +44,6 @@ from racing_kart_manager_core import (
     apply_command,
     brake_test_engaged,
     parse_vehicles,
-    race_events,
-    race_triggers,
     transform,
     with_brake_test,
 )
@@ -101,10 +99,6 @@ class RacingKartManagerNode(Node):
 
         self._notifier = notifier
 
-        #: レース通知の立ち上がり判定用。_on_joy の中だけで読み書きする。
-        #: 単一スレッドの executor で直列に走ることが前提 (REQ-04)。
-        self._triggers = None
-
         self._joy_publishers = {
             vehicle_id: self.create_publisher(Joy, f"/{vehicle_id}/racing_kart/sd/joy", 1)
             for vehicle_id in vehicles
@@ -142,7 +136,7 @@ class RacingKartManagerNode(Node):
         value = to_core_joy(msg)
 
         # 冒頭で1回だけ読む。この1件を処理している間に選択が変わっても、
-        # 宛先とレース通知が食い違わない。
+        # 宛先が途中で変わらない。
         selection = self.selection
 
         engaged = brake_test_engaged(value, selection, self.vehicles, self.brake_test)
@@ -156,7 +150,7 @@ class RacingKartManagerNode(Node):
             self._brake_engaged = engaged
 
         # 一斉指令は transform のあとに重ねる。受信した joy そのもの (value) には
-        # 触らないので、下のレース通知の立ち上がり判定が指令に反応することはない。
+        # 触らない。
         step = advance_command(self._command, self._take_request())
         self._command = step.state
 
@@ -169,11 +163,6 @@ class RacingKartManagerNode(Node):
         if step.notify:
             self.get_logger().info(f"broadcast {step.overlay} to {self.vehicles}")
             self._notifier.publish(COMMAND_EVENTS[step.overlay], value.stamp_ns)
-
-        triggers = race_triggers(value, selection)
-        for event in race_events(self._triggers, triggers):
-            self._notifier.publish(event, value.stamp_ns)
-        self._triggers = triggers
 
 
 def parse_arguments(argv: "list[str]") -> argparse.Namespace:

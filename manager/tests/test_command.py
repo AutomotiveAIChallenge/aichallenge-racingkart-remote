@@ -197,6 +197,11 @@ def test_t47_notifies_once_per_press():
     )
 
 
+def test_t47b_does_not_notify_without_a_gui_command():
+    """T-47: GUI の一斉指令が無い joy フレームでは通知しない (RN-16)。"""
+    assert [notify for _, notify in run([None] * 5)] == [False] * 5
+
+
 def test_t48_each_command_maps_to_its_race_event():
     """T-48: 指令とレース通知のイベントが対応する (RN-16)。"""
     assert COMMAND_EVENTS[COMMAND_RACE_START] == RACE_START

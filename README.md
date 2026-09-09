@@ -94,8 +94,8 @@ manager の仕様は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md)（jo
   レース開始を押すと選択も「全台」に切り替わります。
   **レース終了はブレーキを掛けません。止めるのは緊急停止です。**
 - manager は車両テレメトリを見ません。車両の状態は RViz で確認してください。
-- レース開始・終了は MQTT でも通知します（`kart_race_start` / `kart_race_finish`）。
-  GUI のボタンのほか、全台選択での Y 押下（開始）と緊急停止ボタン（終了）でも飛びます。
+- GUI の「レース開始」「レース終了」を押したときだけ、MQTT でも通知します
+  （`kart_race_start` / `kart_race_finish`）。joy の Y や緊急停止ボタンでは通知しません。
   通知が失敗しても操作は止まりません。
 
 joy の中継・選択の GUI・レース通知は**1つのプロセス**で動きます。GUI を開けない環境では
