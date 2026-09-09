@@ -27,6 +27,9 @@ TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
 # 返っても生き残る。setsid によって run_remote.bash がセッションリーダーになり、
 # 子も孫も同じプロセスグループに入る。停止はそのグループごと畳む (remote-stop)。
 # ホストに ROS 2 Humble と zenoh-bridge-ros2dds が入っていること (README 参照)。
+#
+# 起動前に remote-stop を通す。remote.pid は上書きされるので、止め忘れたまま重ねて
+# 起動すると前のグループが追跡不能な孤児になる (GUI が二枚出て joy を取り合う)。
 remote:
 	@test -n "$(VEHICLES)" || { \
 		echo 'Error: VEHICLES を指定してください。  例: make remote VEHICLES="A2 A3 A7"' >&2; \
@@ -42,6 +45,7 @@ remote:
 		echo '       sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb' >&2; \
 		exit 1; \
 	}
+	@$(MAKE) --no-print-directory remote-stop
 	@mkdir -p output/$(TIMESTAMP)/remote output/latest
 	@ln -sfn "$(PWD)/output/$(TIMESTAMP)/remote" output/latest/remote
 	@setsid ./scripts/run_remote.bash "$(VEHICLES)" "$(PWD)/output/$(TIMESTAMP)" \
@@ -58,6 +62,11 @@ remote-stop:
 	@pid=$$(cat output/remote.pid 2>/dev/null); \
 	if [ -z "$$pid" ]; then \
 		echo "output/remote.pid がありません。起動していないようです。"; \
+		exit 0; \
+	fi; \
+	if ! pgrep -g "$$pid" >/dev/null 2>&1; then \
+		echo "PID group $$pid はもういません。"; \
+		rm -f output/remote.pid; \
 		exit 0; \
 	fi; \
 	echo "stopping PID group $$pid ..."; \
