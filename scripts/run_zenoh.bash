@@ -4,7 +4,7 @@
 #   run_zenoh.bash "A2 A3 A7" [LOG_DIR]
 #
 # 車両1台につき1プロセス。遠隔側は常に ROS_DOMAIN_ID 0 で、トピック名に車両IDが入った
-# まま見える (/A2/racing_kart/joy)。車両側のブリッジが -n /<VEHICLE_ID> でそれを剥がす
+# まま見える (/A2/racing_kart/sd/joy)。車両側のブリッジが -n /<VEHICLE_ID> でそれを剥がす
 # ことで両者が噛み合う。
 #
 # 1台だけ手で試したいときは connect_zenoh.bash を使う。こちらは make remote が

@@ -7,9 +7,9 @@
 #   remote_component.bash manager <LOG_DIR> A2 A3 A7 [--brake-test PERCENT]
 #
 # 起動の前段はここだけが持つ (LN-12)。前段とは .env の読み込み・ROS 環境・
-# ROS_DOMAIN_ID・ログ先の4つを指す。joy.bash は ROS の setup.bash を自分では読まない
-# ので、前段抜きで起こすと ROS が見つからない。.env を読まなければレース通知が黙って
-# 止まる。
+# ROS_DOMAIN_ID・DDS 実装と設定・ログ先を指す。joy.bash は ROS の setup.bash を自分では
+# 読まないので、前段抜きで起こすと ROS が見つからない。.env を読まなければレース通知が
+# 黙って止まる。
 #
 # make remote (run_remote.bash) もランチャ GUI も同じこれを呼ぶ (LN-02, LN-13)。前段が
 # 2箇所にあると、いずれ片方だけが直る。
@@ -149,6 +149,8 @@ fi
 # 遠隔側は常に domain 0。車両側の domain とは無関係で、車両IDで区別する。.env で
 # 変えられないように、読み込みの後で固定する。
 export ROS_DOMAIN_ID=0
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI="file://${repo_root}/shared/cyclonedds.xml"
 
 case "${component}" in
 zenoh)

@@ -5,9 +5,9 @@
 //// 設定ファイルの外で渡せる。車両固有の内容を設定から追い出したので、1ファイルを全車で
 //// 共有できる。許可リストは車両側の vehicle/zenoh.json5 と揃えること。
 ////
-//// 名前空間の付き方: racing_kart_manager は遠隔側で `/A2/racing_kart/joy` を publish し、
-//// このブリッジが zenoh キー `A2/racing_kart/joy` へ流す。車両側のブリッジは `-n /A2` で
-//// 起動しているので、車両の DDS ドメイン内では `/racing_kart/joy` に戻る。
+//// 名前空間の付き方: racing_kart_manager は遠隔側で `/A2/racing_kart/sd/joy` を publish し、
+//// このブリッジが zenoh キー `A2/racing_kart/sd/joy` へ流す。車両側のブリッジは `-n /A2` で
+//// 起動しているので、車両の DDS ドメイン内では `/racing_kart/sd/joy` に戻る。
 //// このブリッジ自身には名前空間を付けない。それが両者を噛み合わせている。
 ////
 {
@@ -63,7 +63,7 @@
       allow: {
         publishers: [
           "/__VEHICLE_ID__/initialpose",
-          "/__VEHICLE_ID__/racing_kart/joy"
+          "/__VEHICLE_ID__/racing_kart/sd/joy"
         ],
         subscribers: [
           "/__VEHICLE_ID__/control/command/control_cmd",
@@ -113,7 +113,7 @@
       ////                   to create a bigger batch of messages. This usually has a positive impact on latency for the topic
       ////                   but a negative impact on the general throughput, as more overhead is used for those topics.
       pub_priorities: [
-        "/__VEHICLE_ID__/racing_kart/joy=1:express",
+        "/__VEHICLE_ID__/racing_kart/sd/joy=1:express",
         "/__VEHICLE_ID__/initialpose=1:express",
       ],
 

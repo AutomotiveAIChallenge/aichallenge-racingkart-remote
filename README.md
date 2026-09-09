@@ -44,8 +44,8 @@ mTLS 素材（zip で別配布）を展開して `tls/` に置いてください
 `MQTT_PASSWORD`）。**認証情報はリポジトリに置きません。** `MQTT_HOST` を空にすると通知を
 送らず、manager はそのまま起動します。
 
-RViz コンテナは `network_mode: host` なので、ホスト側のノードと同じ `ROS_DOMAIN_ID=0`
-で噛み合います。
+RViz コンテナは `network_mode: host` で、ホスト側のノードと同じ `ROS_DOMAIN_ID=0`、
+CycloneDDS 設定で噛み合います。
 
 ## 使い方
 
@@ -62,7 +62,7 @@ make remote-stop                   # 停止
 （車両1台につき1プロセス）・joy・manager を起動します。`setsid` で端末から切り離すので
 make が返っても生き残ります。
 
-起動の前段（`.env` の読み込み・ROS 環境・`ROS_DOMAIN_ID`・ログ先）は
+起動の前段（`.env` の読み込み・ROS 環境・`ROS_DOMAIN_ID`・DDS 設定・ログ先）は
 `scripts/remote_component.bash` が持っています。`run_remote.bash` はそれを3回呼ぶだけで、
 ランチャGUI も同じものを1回ずつ呼びます。前段が2箇所にあると、いずれ片方だけが直るためです。
 
@@ -188,7 +188,6 @@ RViz は扱いません（`make rviz VEHICLE=A3`）。仕様は
 | ファイル | 本体側の正本 |
 |---|---|
 | `shared/vehicle_ports.sh` | `vehicle/vehicle_ports.sh` |
-| `shared/zenoh.json5` | `vehicle/zenoh.json5` |
 | `shared/zenoh-user.json5.template` | `remote/zenoh-user.json5.template` |
 
 車両を追加するとき、zenoh の許可リストを変えるときは、必ず両方のリポジトリを揃えてください。

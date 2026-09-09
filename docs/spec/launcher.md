@@ -63,11 +63,12 @@ remote_component.bash joy     <LOG_DIR>
 remote_component.bash manager <LOG_DIR> A2 A3 A7 [--brake-test N]
 ```
 
-- **LN-12** 起動の前段は `remote_component.bash` が持つ。前段とは次の4つを指す。
+- **LN-12** 起動の前段は `remote_component.bash` が持つ。前段とは次の5つを指す。
   1. `.env` の読み込み（MQTT の認証情報、`TLS_ROOT`）
   2. `/opt/ros/humble/setup.bash` の読み込み
   3. `ROS_DOMAIN_ID=0` の設定
-  4. ログ先の作成と、標準出力・標準エラーのログファイルへの接続
+  4. `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` と `CYCLONEDDS_URI` の設定
+  5. ログ先の作成と、標準出力・標準エラーのログファイルへの接続
 
   `joy.bash` は ROS の `setup.bash` を自分では読まない。前段抜きで起こすと ROS が見つからず、
   `.env` を読まなければレース通知が黙って止まる。
