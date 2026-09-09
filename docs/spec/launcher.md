@@ -1,6 +1,6 @@
 # 遠隔操作GUI仕様
 
-`scripts/remote_launcher.py` は、遠隔操作PCで Zenoh / RViz / Joy / Manager を個別に
+`scripts/gui_tools.py` は、遠隔操作PCで Zenoh / RViz / Joy / Manager を個別に
 起動・停止・再起動するGUIである。
 
 実装は本体リポジトリの

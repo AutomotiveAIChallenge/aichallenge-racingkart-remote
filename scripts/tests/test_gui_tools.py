@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-import remote_launcher as launcher
+import gui_tools as launcher
 
 
 def test_manager_has_start_stop_and_restart_commands():

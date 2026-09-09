@@ -35,7 +35,7 @@ WINDOW_GEOMETRY = "1100x680"
 WINDOW_MIN_SIZE = (900, 540)
 
 # --- ログ処理まわりの定数 ---
-# chatty な子プロセス (zenoh-bridge, rviz, joy など) がログを高速に吐いても
+# chatty な子プロセス (zenoh-bridge, rviz, joy, manager など) がログを高速に吐いても
 # Tk のメインループを飢餓状態にしないための上限・予算値。
 MAX_LOG_LINES = 2000  # 各ログウィジェットが保持する最大行数
 LOG_QUEUE_MAXSIZE = 10000  # ログキューの上限。超えたら行を捨てる (producer は絶対にブロックしない)

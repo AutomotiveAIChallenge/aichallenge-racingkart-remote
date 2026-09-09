@@ -133,7 +133,7 @@ make rviz-stop
 ### ランチャGUI（Zenoh / RViz / Joy / Manager を個別に操作する）
 
 ```bash
-python3 scripts/remote_launcher.py
+./scripts/gui_tools.py
 ```
 
 本体リポジトリの `remote/gui_tools.py` と同じGUIに Manager の列とログを加えたものです。
