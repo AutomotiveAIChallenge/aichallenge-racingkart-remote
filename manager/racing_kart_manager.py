@@ -8,14 +8,15 @@ racing_kart_manager_core の純関数が行い、このファイルは「購読�
 スレッドは3つ。
 
     メイン        Tk の mainloop、ボタン、100ms の再描画
-    ROS 実行      joy の受信・変換・publish・レース通知の立ち上がり判定
+    ROS 実行      joy の受信・変換・publish・GUI 一斉指令の処理
     race_notifier mosquitto_pub の起動と再試行
 
-守る約束は3つ。
+守る約束は4つ。
 
     1. Tk のウィジェットに触るのはメインスレッドだけ (Tkinter はスレッドセーフでない)
     2. node.selection を書くのはメインスレッドだけ。ROS スレッドは読むだけ
-    3. joy のコールバックは外部 I/O を待たない。通知はキューに積んで即座に戻る
+    3. 一斉指令はキュー越しに渡す。メインスレッドが put し、ROS スレッドが get する
+    4. joy のコールバックは外部 I/O を待たない。通知はキューに積んで即座に戻る
 
 仕様: docs/spec/joy-routing.md, docs/spec/race-notification.md
 """
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import queue
 import signal
 import sys
 import threading
@@ -34,12 +36,14 @@ from sensor_msgs.msg import Joy
 
 from race_notifier import RaceNotifier, config_from_env
 from racing_kart_manager_core import (
+    COMMAND_EVENTS,
     INITIAL_SELECTION,
+    CommandState,
     JoyValue,
+    advance_command,
+    apply_command,
     brake_test_engaged,
     parse_vehicles,
-    race_events,
-    race_triggers,
     transform,
     with_brake_test,
 )
@@ -86,11 +90,14 @@ class RacingKartManagerNode(Node):
         #: 書き手が1つで、読み書きとも文字列1つの代入なのでロックは要らない。
         self.selection = INITIAL_SELECTION
 
-        self._notifier = notifier
+        #: GUI (メインスレッド) が put し、joy のコールバック (ROS スレッド) が get する。
+        #: 選択と違って書き手が両側に居るので、素の属性ではなくキューで渡す。
+        self._requests: queue.SimpleQueue = queue.SimpleQueue()
 
-        #: レース通知の立ち上がり判定用。_on_joy の中だけで読み書きする。
-        #: 単一スレッドの executor で直列に走ることが前提 (REQ-04)。
-        self._triggers = None
+        #: 一斉指令の繰り返しの残り。_on_joy の中だけで読み書きする。
+        self._command = CommandState()
+
+        self._notifier = notifier
 
         self._joy_publishers = {
             vehicle_id: self.create_publisher(Joy, f"/{vehicle_id}/racing_kart/sd/joy", 1)
@@ -101,6 +108,25 @@ class RacingKartManagerNode(Node):
 
         self.get_logger().info(f"racing_kart_manager started. vehicles={vehicles}")
 
+    def request_command(self, command: str) -> None:
+        """一斉指令を受け付ける。GUI のボタンから呼ぶ (REQ-29)。
+
+        ここでは publish しない。実際に joy へ乗るのは次に joy を受け取ったとき
+        (REQ-32)。タイマーでも押下でも送出しないのは REQ-13 のため。
+        """
+        self._requests.put(command)
+
+    def _take_request(self) -> "str | None":
+        """溜まっている指令を1つだけ採る。
+
+        1フレームに1つに絞る。連打しても押した順に1つずつ処理され、押下1回につき
+        通知1回が保たれる (RN-16)。joy は 20Hz で来るので溜まっても順に捌ける。
+        """
+        try:
+            return self._requests.get_nowait()
+        except queue.Empty:
+            return None
+
     def _on_joy(self, msg: Joy) -> None:
         """joy 受信が唯一の publish 契機 (REQ-13)。
 
@@ -110,7 +136,7 @@ class RacingKartManagerNode(Node):
         value = to_core_joy(msg)
 
         # 冒頭で1回だけ読む。この1件を処理している間に選択が変わっても、
-        # 宛先とレース通知が食い違わない。
+        # 宛先が途中で変わらない。
         selection = self.selection
 
         engaged = brake_test_engaged(value, selection, self.vehicles, self.brake_test)
@@ -123,13 +149,20 @@ class RacingKartManagerNode(Node):
             )
             self._brake_engaged = engaged
 
-        for vehicle_id, outgoing in transform(value, selection, self.vehicles).items():
-            self._joy_publishers[vehicle_id].publish(to_ros_joy(outgoing))
+        # 一斉指令は transform のあとに重ねる。受信した joy そのもの (value) には
+        # 触らない。
+        step = advance_command(self._command, self._take_request())
+        self._command = step.state
 
-        triggers = race_triggers(value, selection)
-        for event in race_events(self._triggers, triggers):
-            self._notifier.publish(event, value.stamp_ns)
-        self._triggers = triggers
+        outgoing = apply_command(
+            transform(value, selection, self.vehicles), step.overlay
+        )
+        for vehicle_id, joy in outgoing.items():
+            self._joy_publishers[vehicle_id].publish(to_ros_joy(joy))
+
+        if step.notify:
+            self.get_logger().info(f"broadcast {step.overlay} to {self.vehicles}")
+            self._notifier.publish(COMMAND_EVENTS[step.overlay], value.stamp_ns)
 
 
 def parse_arguments(argv: "list[str]") -> argparse.Namespace:
