@@ -19,10 +19,102 @@ from tkinter.scrolledtext import ScrolledText
 
 ROOT_DIR = Path(__file__).resolve().parent
 REMOTE_DIR = ROOT_DIR
+REPO_ROOT = ROOT_DIR.parent
+
+# ランチャ自身の多重起動防止に使う (LN-15)。GUI が2枚開くと、互いの状態を知らないまま
+# 同じ zenoh/joy/manager を起動できてしまう。
+LAUNCHER_PID_FILE = REPO_ROOT / "output" / "gui-launcher.pid"
+# `make remote` (run_remote.bash) が書く PID。setsid のセッションリーダーの PID で、
+# そのままプロセスグループ ID でもある。GUI 側の起動・再起動はこれが生きている間
+# 拒否する (LN-15)。
+REMOTE_PID_FILE = REPO_ROOT / "output" / "remote.pid"
 
 # 遠隔操作の対象にする実車。Zenoh と Manager は複数台、RViz はこの中の1台を取る。
 VEHICLE_IDS = ["A2", "A3", "A6", "A7"]
 DEFAULT_RVIZ_VEHICLE_ID = "A2"
+
+
+# --- 多重起動防止まわりの純粋関数 (Tk に依存しないので pytest から直接叩ける) ---
+
+
+def _read_pid_file(path: Path) -> Optional[int]:
+    """PID ファイルを読む。無い・空・数値でない場合は None (stale 扱い)。"""
+    try:
+        text = path.read_text().strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _pid_alive(pid: int) -> bool:
+    """単一プロセスとして生きているか。シグナルは送らない (sig=0)。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # 別ユーザー所有などで確認できないだけで、存在はしている。
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def acquire_launcher_lock(path: Path) -> bool:
+    """ランチャ GUI 自身の多重起動を防ぐ (LN-15)。
+
+    既存の PID ファイルが生きたプロセスを指していれば False を返し、呼び出し側は
+    起動を諦める。ファイルが無い・空・不正・死んだプロセスを指している (stale) 場合は
+    上書きして自分の PID を書き、True を返す。`output/` が無ければ作る。
+    """
+    existing = _read_pid_file(path)
+    if existing is not None and _pid_alive(existing):
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{os.getpid()}\n")
+    return True
+
+
+def release_launcher_lock(path: Path) -> None:
+    """`acquire_launcher_lock` で書いた PID ファイルを消す。無ければ何もしない。"""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def remote_stack_pid(path: Path) -> Optional[int]:
+    """`make remote` (run_remote.bash) のプロセスグループが生きていれば PID を返す。
+
+    Makefile の remote-stop / ps と同じ判定 (`pgrep -g` 相当) を Python 側でも行う。
+    setsid で起動しているので PID がそのままプロセスグループ ID になる。ファイルが
+    無い・空・不正、またはグループが既に消えている場合は None (動いていないとみなす)。
+    """
+    pid = _read_pid_file(path)
+    if pid is None:
+        return None
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        return pid
+    except OSError:
+        return None
+    return pid
+
+
+def command_touches_remote_component(command_text: str) -> bool:
+    """レンダリング後のコマンドが `remote_component.bash` (zenoh/joy/manager) を
+    起動するかどうか。RViz はコンテナで `make remote` と競合しないので対象外 (LN-15)。
+    """
+    return "remote_component.bash" in command_text
+
 
 # --- ウィンドウ ---
 WINDOW_GEOMETRY = "1100x680"
@@ -807,6 +899,20 @@ class RemoteGui:
             return
 
         command_text = spec.render(vehicle_ids, rviz_vehicle_id)
+
+        # make remote (run_remote.bash) が生きている間は zenoh/joy/manager を起動・
+        # 再起動させない (LN-15)。二重起動すると joy publisher が重複し、車両側は
+        # どちらが本物か区別できない。RViz はコンテナなのでここには来ない。
+        if command_touches_remote_component(command_text):
+            conflict_pid = remote_stack_pid(REMOTE_PID_FILE)
+            if conflict_pid is not None:
+                messagebox.showwarning(
+                    "起動できません",
+                    f"make remote が動いています (PID group {conflict_pid})。"
+                    "先に make remote-stop してください。",
+                )
+                return
+
         working_dir = REMOTE_DIR
         note = spec.note or ""
         self._update_preview(working_dir, command_text, note)
@@ -1306,34 +1412,56 @@ class RemoteGui:
         except tk.TclError:
             pass
 
-def main() -> None:
+def _show_startup_error(title: str, message: str) -> None:
+    """RemoteGui を作る前に出すエラーダイアログ用の、最小限の Tk root。"""
     root = tk.Tk()
-    app = RemoteGui(root)
+    root.withdraw()
+    messagebox.showerror(title, message)
+    root.destroy()
 
-    def _handle_termination_signal(signum: int, frame: object) -> None:
-        # シグナルハンドラの中で Tk API (root.quit() など) を直接叩くのは避け、
-        # フラグを立てるだけにする。実際の後始末は root.after で常時回っている
-        # _poll_log_queue がフラグを見て _on_close 経由で行う (RC10)。
-        app._pending_shutdown = True
 
-    signal.signal(signal.SIGINT, _handle_termination_signal)
-    signal.signal(signal.SIGTERM, _handle_termination_signal)
+def main() -> None:
+    # ランチャ GUI 自身の多重起動を防ぐ (LN-15)。2枚目は互いの状態を知らないまま
+    # 同じ zenoh/joy/manager を起動できてしまうため、ここで弾く。
+    existing_pid = _read_pid_file(LAUNCHER_PID_FILE)
+    if not acquire_launcher_lock(LAUNCHER_PID_FILE):
+        _show_startup_error(
+            "起動できません",
+            f"ランチャは既に起動しています (PID {existing_pid})。そちらを使ってください。",
+        )
+        raise SystemExit(1)
 
     try:
-        root.mainloop()
-    except KeyboardInterrupt:
-        # 端末からの Ctrl+C がシグナルハンドラより先に素通りしてきた場合の保険。
-        app._closing = True
+        root = tk.Tk()
+        app = RemoteGui(root)
+
+        def _handle_termination_signal(signum: int, frame: object) -> None:
+            # シグナルハンドラの中で Tk API (root.quit() など) を直接叩くのは避け、
+            # フラグを立てるだけにする。実際の後始末は root.after で常時回っている
+            # _poll_log_queue がフラグを見て _on_close 経由で行う (RC10)。
+            app._pending_shutdown = True
+
+        signal.signal(signal.SIGINT, _handle_termination_signal)
+        signal.signal(signal.SIGTERM, _handle_termination_signal)
+
         try:
-            root.withdraw()
-        except tk.TclError:
-            pass
+            root.mainloop()
+        except KeyboardInterrupt:
+            # 端末からの Ctrl+C がシグナルハンドラより先に素通りしてきた場合の保険。
+            app._closing = True
+            try:
+                root.withdraw()
+            except tk.TclError:
+                pass
+        finally:
+            # Ctrl+C (SIGINT)・SIGTERM・ウィンドウを閉じ忘れた異常系のいずれでも、
+            # 子プロセスグループを確実に畳んでからプロセスを終了する (RC10)。
+            # _on_close 経由の後始末が既に完了していれば self.processes は空なので、
+            # ここは安全に no-op になる。
+            app._terminate_all(blocking=True)
     finally:
-        # Ctrl+C (SIGINT)・SIGTERM・ウィンドウを閉じ忘れた異常系のいずれでも、
-        # 子プロセスグループを確実に畳んでからプロセスを終了する (RC10)。
-        # _on_close 経由の後始末が既に完了していれば self.processes は空なので、
-        # ここは安全に no-op になる。
-        app._terminate_all(blocking=True)
+        # RemoteGui.__init__ が SystemExit で抜けた場合も含め、確保したロックは必ず戻す。
+        release_launcher_lock(LAUNCHER_PID_FILE)
 
 if __name__ == "__main__":
     main()

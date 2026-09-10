@@ -150,7 +150,11 @@ Restart は停止完了を待ってから起動します。ログが大量に流
 有界キューと描画時間の上限も設けています。
 
 **`make remote` と同時には使わないでください。** JoyやManagerが二重起動します。
-先に `make remote-stop` で一括起動側を止めてください。詳しい仕様は
+先に `make remote-stop` で一括起動側を止めてください。GUIは起動時に
+`output/gui-launcher.pid` へ自分のPIDを書き、2枚目のGUIや、GUI起動中の
+`make remote` を検出するとエラーで止まります（GUI自身の多重起動、
+`make remote` が動いている間のZenoh/Joy/Managerの起動・再起動、
+GUIが動いている間の `make remote` の3方向）。詳しい仕様は
 [`docs/spec/launcher.md`](docs/spec/launcher.md) にあります。
 
 ### 単車を手で扱う

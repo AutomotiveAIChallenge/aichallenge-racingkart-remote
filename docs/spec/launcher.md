@@ -46,4 +46,23 @@ Zenoh / Manager の対象車両は `A2 A3 A6 A7` のチェックボックスで�
 ## 運用上の注意
 
 GUIが追跡するのはGUI自身が起動したプロセスだけである。`make remote` と同時に使うとJoyや
-Managerが二重起動するため、GUIを使う前に `make remote-stop` で一括起動側を停止する。
+Managerが二重起動するため、両方向にガードを入れている (LN-15)。
+
+- **GUI 自身の多重起動防止**: 起動時に `output/gui-launcher.pid` へ自分のPIDを書く。
+  既存ファイルが生きたプロセスを指していれば「ランチャは既に起動しています」と
+  エラーダイアログを出して終了する (`acquire_launcher_lock`)。ファイルが無い・
+  死んだプロセスを指す (stale) 場合は上書きする。正常終了時 (`main()` の finally) に
+  ファイルを消す (`release_launcher_lock`)。
+- **`make remote` が動いている間はGUIから起動・再起動させない**: Zenoh / Joy /
+  Manager の Start・Restart (および「Zenoh and RViz」の Zenoh 部分) を押す前に、
+  `output/remote.pid` のプロセスグループが生きていないか確認する
+  (`remote_stack_pid`)。生きていれば「make remote が動いています。先に
+  make remote-stop してください」と警告して起動しない。RViz単体の操作は
+  コンテナなので対象外。
+- **`make remote` はGUIが動いている間は起動しない**: Makefile の `remote:` が
+  `output/gui-launcher.pid` を見て、生きていれば「ランチャ GUI が動いています。
+  GUI を閉じてから make remote してください」とエラーを出して終了する。
+  `make ps` は `launcher: up (PID n)` / `down` も表示する。
+
+いずれのガードも「先に相手を止めてください」という案内で止まるだけで、
+自動でどちらかを終了させることはしない。

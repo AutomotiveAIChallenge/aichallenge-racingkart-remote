@@ -32,12 +32,22 @@ TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
 #
 # 起動前に remote-stop を通す。remote.pid は上書きされるので、止め忘れたまま重ねて
 # 起動すると前のグループが追跡不能な孤児になる (GUI が二枚出て joy を取り合う)。
+#
+# ランチャ GUI (scripts/gui_tools.py) が動いている間はここで止める。GUI は個別に
+# zenoh/joy/manager を起動できるので、知らずに make remote を重ねると joy publisher が
+# 二重になる。GUI 側も同じ理由で output/remote.pid を見て自分からの起動・再起動を拒否する
+# (両方向のガード。詳細は docs/spec/launcher.md)。
 remote:
 	@test -n "$(VEHICLES)" || { \
 		echo 'Error: VEHICLES を指定してください。  例: make remote VEHICLES="A2 A3 A7"' >&2; \
 		exit 1; \
 	}
 	@./scripts/remote_component.bash check
+	@pid=$$(cat output/gui-launcher.pid 2>/dev/null); \
+	if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+		echo "Error: ランチャ GUI (scripts/gui_tools.py, PID $$pid) が動いています。GUI を閉じてから make remote してください。" >&2; \
+		exit 1; \
+	fi
 	@$(MAKE) --no-print-directory remote-stop
 	@mkdir -p output/$(TIMESTAMP)/remote output/latest
 	@ln -sfn "$(PWD)/output/$(TIMESTAMP)/remote" output/latest/remote
@@ -107,6 +117,12 @@ ps:
 		pgrep -g "$$pid" -a | sed 's/^/  /'; \
 	else \
 		echo "remote: down"; \
+	fi
+	@lpid=$$(cat output/gui-launcher.pid 2>/dev/null); \
+	if [ -n "$$lpid" ] && kill -0 "$$lpid" 2>/dev/null; then \
+		echo "launcher: up (PID $$lpid)"; \
+	else \
+		echo "launcher: down"; \
 	fi
 	@echo
 	@docker compose ps
