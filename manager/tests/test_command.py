@@ -30,6 +30,7 @@ from racing_kart_manager_core import (
     SELECTION_NONE,
     CommandState,
     JoyValue,
+    accel_released,
     advance_command,
     apply_command,
     latest_request,
@@ -43,13 +44,27 @@ def broadcast(joy: JoyValue, selection: str, command: str) -> dict[str, JoyValue
 
 
 def run(requests: list) -> list:
-    """指令の要求列を流したときに、各 joy へ重なる指令と通知の有無を並べる。"""
+    """指令の要求列を流したときに、各 joy へ重なる指令と通知の有無を並べる。
+
+    ここではアクセルは常に離れている (accel_released=True) ものとして進める。
+    スロットルカットの持続 (REQ-37) を見たいテストは run_with_cut を使う。
+    """
+    return [(overlay, notify) for overlay, notify, _ in run_with_cut(requests)]
+
+
+def run_with_cut(requests: list, accel_released_flags: "list | None" = None) -> list:
+    """指令の要求列を流したときに、指令・通知・スロットルカットの持続を並べる (REQ-37)。
+
+    accel_released_flags を渡さなければ、常にアクセルが離れているものとして進める。
+    """
+    if accel_released_flags is None:
+        accel_released_flags = [True] * len(requests)
     state = CommandState()
     result = []
-    for requested in requests:
-        step = advance_command(state, requested)
+    for requested, released in zip(requests, accel_released_flags):
+        step = advance_command(state, requested, released)
         state = step.state
-        result.append((step.overlay, step.notify))
+        result.append((step.overlay, step.notify, step.cut_throttle))
     return result
 
 
@@ -234,3 +249,115 @@ def test_t48_each_command_maps_to_its_race_event():
     """T-48: 指令とレース通知のイベントが対応する (RN-16)。"""
     assert COMMAND_EVENTS[COMMAND_RACE_START] == RACE_START
     assert COMMAND_EVENTS[COMMAND_RACE_FINISH] == RACE_FINISH
+
+
+# --------------------------------------------------------------------------
+# アクセルが離れる判定 (T-49 の前提)
+# --------------------------------------------------------------------------
+
+
+def test_accel_released_is_false_while_the_trigger_is_pressed():
+    """トリガーを踏んでいる間 (軸が -1.0 寄り) は離れていない。"""
+    assert accel_released(JOY_FULL) is False
+
+
+def test_accel_released_is_true_at_no_input():
+    """無操作値 (+1.0) では離れている。"""
+    assert accel_released(JOY_NO_INPUT) is True
+
+
+def test_accel_released_tolerates_a_small_offset_from_no_input():
+    """無操作値ぴったりでなくても、わずかな遊びは離れた扱いにする。"""
+    almost_released = JoyValue(
+        axes=(0.0, 0.0, +1.0, 0.0, 0.0, +0.97, 0.0, 0.0), buttons=JOY_NO_INPUT.buttons
+    )
+    assert accel_released(almost_released) is True
+
+
+def test_accel_released_is_false_on_a_malformed_frame():
+    """T-49c: 要素数が足りない joy では判定できないので「離れていない」扱いにする。
+
+    REQ-18 / REQ-36 と同じ、壊れた入力では安全側 (カットを続ける側) に倒す考え方。
+    """
+    malformed = JoyValue(axes=(0.0, 0.0, 0.0), buttons=(0, 0))
+    assert accel_released(malformed) is False
+
+
+# --------------------------------------------------------------------------
+# スロットルカットの持続 (T-49)
+# --------------------------------------------------------------------------
+
+
+def test_t49_throttle_cut_persists_after_the_repeat_window_while_accel_is_held():
+    """T-49: レース終了を受け付けたら、繰り返しの10フレームを過ぎてもアクセルを
+    離すまでスロットルカットを保つ (REQ-37)。
+
+    10フレームだけで切ると、トリガーを踏んだまま終了ボタンを押した場合に、
+    繰り返しが終わった直後からアクセルが車両へ再び届いてしまう。
+    """
+    requests = [COMMAND_RACE_FINISH] + [None] * (COMMAND_REPEAT + 5)
+    steps = run_with_cut(requests, accel_released_flags=[False] * len(requests))
+
+    assert [cut for _, _, cut in steps] == [True] * len(requests)
+    # 重ねるボタン自体は決められた10フレームで止まる (T-43 と同じ)。
+    overlays = [overlay for overlay, _, _ in steps]
+    assert overlays[COMMAND_REPEAT:] == [None] * (len(requests) - COMMAND_REPEAT)
+
+
+def test_t49_throttle_cut_clears_once_accel_is_released():
+    """T-49: アクセルが無操作値まで戻ったらスロットルカットを解く。"""
+    requests = [COMMAND_RACE_FINISH, None, None]
+    released_flags = [False, False, True]
+    steps = run_with_cut(requests, accel_released_flags=released_flags)
+
+    assert [cut for _, _, cut in steps] == [True, True, False]
+
+
+def test_t49b_throttle_cut_survives_a_race_start_pressed_while_accel_is_held():
+    """T-49b: レース終了のあとにレース開始を押しても、アクセルを踏んだままなら
+    カットは解けない (REQ-37)。物理的に離すまでは解除操作にならない。
+    """
+    requests = [COMMAND_RACE_FINISH] + [None] * 3 + [COMMAND_RACE_START] + [None] * 3
+    steps = run_with_cut(requests, accel_released_flags=[False] * len(requests))
+
+    assert [cut for _, _, cut in steps] == [True] * len(requests)
+    overlays = [overlay for overlay, _, _ in steps]
+    assert overlays[4] == COMMAND_RACE_START  # 開始が上書きしても Y は重なる
+
+
+def test_t49c_advance_command_does_not_crash_on_a_malformed_frame():
+    """T-49c: 壊れた joy から作った accel_released=False でも例外にならない。"""
+    step = advance_command(CommandState(), COMMAND_RACE_FINISH, accel_released=False)
+
+    assert step.cut_throttle is True
+
+
+def test_t49d_apply_command_cuts_the_accelerator_on_every_vehicle_while_latched():
+    """T-49: カットが持続している間は、重ねる指令が無いフレームでも全車のアクセルを
+    無操作値にする (REQ-30, REQ-37)。ブレーキなど他の軸には触れない。
+    """
+    braking = JoyValue(
+        axes=(0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0), buttons=JOY_NO_INPUT.buttons
+    )
+    outgoing = apply_command(
+        transform(braking, SELECTION_ALL, ("A2", "A3", "A7")),
+        command=None,
+        cut_throttle=True,
+    )
+
+    assert set(outgoing) == {"A2", "A3", "A7"}
+    for joy in outgoing.values():
+        assert joy.axes[AXIS_ACCEL] == NO_INPUT_AXES[AXIS_ACCEL]
+        assert joy.axes[2] == -1.0  # ブレーキは触らない
+
+
+def test_t49e_apply_command_does_not_cut_when_not_latched():
+    """カットが立っていなければ従来どおりアクセルを素通しする。"""
+    outgoing = apply_command(
+        transform(JOY_FULL, SELECTION_ALL, ("A2", "A3", "A7")),
+        command=None,
+        cut_throttle=False,
+    )
+
+    for joy in outgoing.values():
+        assert joy.axes[AXIS_ACCEL] == JOY_FULL.axes[AXIS_ACCEL]

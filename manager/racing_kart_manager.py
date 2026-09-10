@@ -40,6 +40,7 @@ from racing_kart_manager_core import (
     INITIAL_SELECTION,
     CommandState,
     JoyValue,
+    accel_released,
     advance_command,
     apply_command,
     brake_test_engaged,
@@ -161,11 +162,17 @@ class RacingKartManagerNode(Node):
 
         # 一斉指令は transform のあとに重ねる。受信した joy そのもの (value) には
         # 触らない。
-        step = advance_command(self._command, self._take_request())
+        step = advance_command(
+            self._command, self._take_request(), accel_released(value)
+        )
         self._command = step.state
 
+        # レース終了で切ったスロットルは、繰り返しの10フレームを過ぎてもアクセルが
+        # 物理的に離れるまで重ね続ける (REQ-37, step.cut_throttle)。
         outgoing = apply_command(
-            transform(value, selection, self.vehicles), step.overlay
+            transform(value, selection, self.vehicles),
+            step.overlay,
+            step.cut_throttle,
         )
         for vehicle_id, joy in outgoing.items():
             self._joy_publishers[vehicle_id].publish(to_ros_joy(joy))

@@ -259,6 +259,10 @@ COMMAND_EVENTS: dict[str, str] = {
 #: joy_node は 20Hz なので 10 でおよそ0.5秒。
 COMMAND_REPEAT = 10
 
+#: アクセル軸が無操作値からこれだけ離れていれば「離れている」とみなす遊び (REQ-37)。
+#: ぴったり NO_INPUT_AXES[AXIS_ACCEL] でなくてもよいよう、わずかな余裕を持たせる。
+ACCEL_RELEASE_TOLERANCE = 0.05
+
 
 def latest_request(requests: "list[str]") -> tuple[Optional[str], tuple[str, ...]]:
     """溜まっている指令の要求から、最新の1つだけを残す (REQ-34)。
@@ -275,12 +279,28 @@ def latest_request(requests: "list[str]") -> tuple[Optional[str], tuple[str, ...
     return pending[-1], pending[:-1]
 
 
+def accel_released(joy: JoyValue) -> bool:
+    """joy のアクセル軸が無操作値まで戻っているか (REQ-37)。
+
+    要素数が足りない壊れた joy では判定できない。REQ-18 / REQ-36 と同じく、
+    壊れた入力では安全側 (=離れていない、カットを続ける) に倒す。
+    """
+    if len(joy.axes) <= AXIS_ACCEL:
+        return False
+    return joy.axes[AXIS_ACCEL] >= NO_INPUT_AXES[AXIS_ACCEL] - ACCEL_RELEASE_TOLERANCE
+
+
 @dataclass(frozen=True)
 class CommandState:
     """一斉指令の残り。ROS の実行スレッドの中だけで読み書きする。"""
 
     command: Optional[str] = None
     remaining: int = 0
+
+    #: レース終了で切ったスロットルを、アクセルが物理的に離れるまで持ち越すラッチ
+    #: (REQ-37)。繰り返しの10フレーム (remaining) とは別に持つ。トリガーを踏んだまま
+    #: 繰り返しが終わると、10フレームだけでは直後にアクセルが車両へ届いてしまう。
+    throttle_cut: bool = False
 
 
 @dataclass(frozen=True)
@@ -296,26 +316,56 @@ class CommandStep:
     #: この joy でレース通知を出すか
     notify: bool
 
+    #: この joy でアクセル軸を無操作値に切るか (REQ-37)
+    cut_throttle: bool
 
-def advance_command(state: CommandState, requested: Optional[str]) -> CommandStep:
-    """joy を1つ処理するときの一斉指令の進み方 (REQ-33, REQ-34, RN-16)。
+
+def advance_command(
+    state: CommandState, requested: Optional[str], accel_released: bool
+) -> CommandStep:
+    """joy を1つ処理するときの一斉指令の進み方 (REQ-33, REQ-34, REQ-37, RN-16)。
 
     `requested` は、この joy を処理する直前に GUI から届いた指令 (無ければ None)。
+    `accel_released` は、この joy のアクセル軸が無操作値まで戻っているか
+    (accel_released() 関数を参照)。
+
     繰り返しの途中で新しい指令が来たら、あとの指令で置き換えて数え直す (REQ-34)。
 
     通知を出すのは受け付けた最初の1回だけ。繰り返しの各フレームで出すと、1回の押下で
     同じ時刻の通知が10回飛ぶ (RN-16)。
+
+    レース終了を受け付けたらスロットルカットのラッチを立て、アクセルが物理的に離れる
+    まで下ろさない (REQ-37)。繰り返しの10フレームが終わっても、レース開始を挟んでも
+    ラッチは解けない。解けるのはアクセルを離したときだけである。
     """
     if requested is not None:
-        state = CommandState(command=requested, remaining=COMMAND_REPEAT)
+        state = CommandState(
+            command=requested,
+            remaining=COMMAND_REPEAT,
+            throttle_cut=state.throttle_cut,
+        )
+
+    throttle_cut = state.throttle_cut or requested == COMMAND_RACE_FINISH
+    if accel_released:
+        throttle_cut = False
 
     if state.remaining <= 0:
-        return CommandStep(state=CommandState(), overlay=None, notify=False)
+        return CommandStep(
+            state=CommandState(throttle_cut=throttle_cut),
+            overlay=None,
+            notify=False,
+            cut_throttle=throttle_cut,
+        )
 
     return CommandStep(
-        state=CommandState(command=state.command, remaining=state.remaining - 1),
+        state=CommandState(
+            command=state.command,
+            remaining=state.remaining - 1,
+            throttle_cut=throttle_cut,
+        ),
         overlay=state.command,
         notify=requested is not None,
+        cut_throttle=throttle_cut,
     )
 
 
@@ -323,6 +373,10 @@ def with_command(joy: JoyValue, command: str) -> JoyValue:
     """一斉指令を1台分の joy に重ねる (REQ-31)。
 
     緊急停止の4ボタンとその解除には触れない。緊急停止中でも指令は重なる (REQ-35)。
+
+    ここでのアクセルカットは、この joy 1フレームだけの重ね合わせにすぎない。
+    トリガーを踏んだままの持続的なカットは advance_command の throttle_cut ラッチが
+    受け持ち、apply_command 側で別途重ねる (REQ-37)。
     """
     axes = list(joy.axes)
     buttons = list(joy.buttons)
@@ -340,19 +394,37 @@ def with_command(joy: JoyValue, command: str) -> JoyValue:
     return JoyValue(axes=tuple(axes), buttons=tuple(buttons), stamp_ns=joy.stamp_ns)
 
 
+def _with_throttle_cut(joy: JoyValue) -> JoyValue:
+    """アクセル軸だけを無操作値にする (REQ-37)。ブレーキや他の軸・ボタンには触れない。"""
+    axes = list(joy.axes)
+    axes[AXIS_ACCEL] = NO_INPUT_AXES[AXIS_ACCEL]
+    return JoyValue(axes=tuple(axes), buttons=joy.buttons, stamp_ns=joy.stamp_ns)
+
+
 def apply_command(
-    outgoing: dict[str, JoyValue], command: Optional[str]
+    outgoing: dict[str, JoyValue],
+    command: Optional[str],
+    cut_throttle: bool = False,
 ) -> dict[str, JoyValue]:
-    """transform が作った送出先ごとの joy に、一斉指令を重ねる (REQ-30)。
+    """transform が作った送出先ごとの joy に、一斉指令とスロットルカットを重ねる
+    (REQ-30, REQ-37)。
 
     選択は問わない。非選択車にも届く。要素数が規定と異なる joy を受け取ったフレームでも
     届く (REQ-36)。指令の出どころは GUI であり、joy の壊れ方とは無関係である。
+
+    `cut_throttle` はレース終了後にアクセルが物理的に離れるまで続くラッチ (REQ-37)。
+    `command` が None (繰り返しの10フレームを過ぎた) でも、ラッチが立っていれば
+    引き続き全車のアクセルを無操作値にする。重ねる指令と同じ範囲 (対象車両の全部) に効く。
     """
-    if command is None:
-        return outgoing
-    return {
-        vehicle_id: with_command(joy, command) for vehicle_id, joy in outgoing.items()
-    }
+    if command is not None:
+        outgoing = {
+            vehicle_id: with_command(joy, command) for vehicle_id, joy in outgoing.items()
+        }
+    if cut_throttle:
+        outgoing = {
+            vehicle_id: _with_throttle_cut(joy) for vehicle_id, joy in outgoing.items()
+        }
+    return outgoing
 
 
 # --------------------------------------------------------------------------
