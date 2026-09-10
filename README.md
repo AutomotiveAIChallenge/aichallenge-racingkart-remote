@@ -47,6 +47,12 @@ mTLS 素材（zip で別配布）を展開して `tls/` に置いてください
 RViz コンテナは `network_mode: host` なので、ホスト側のノードと同じ `ROS_DOMAIN_ID=0`
 で噛み合います。
 
+DDS の探索は `shared/cyclonedds.xml` で `lo` に固定しています。`lo` に MULTICAST フラグが
+無いホストでは CycloneDDS がユニキャスト探索に落ち、既定では同一ホストに ROS プロセスを
+10 個までしか立てられません（11 個目が `Failed to find a free participant index` で落ちる）。
+遠隔PCは 4 台構成で 16 プロセスになるので、同ファイルで上限を 100 に広げています。
+`sudo ip link set lo multicast on` は不要です。
+
 ## 使い方
 
 ### 遠隔操作

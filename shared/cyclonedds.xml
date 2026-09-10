@@ -8,6 +8,18 @@
       <AllowMulticast>default</AllowMulticast>
       <MaxMessageSize>65500B</MaxMessageSize>
     </General>
+    <Discovery>
+      <!--
+        lo に MULTICAST フラグが無いホスト (Ubuntu 既定) では CycloneDDS がマルチキャストを
+        諦めて localhost へのユニキャスト探索に落ちる。その探索先は participant index
+        0..MaxAutoParticipantIndex に限られ、既定の 9 では同一ホスト・同一ドメインに
+        11 個目の ROS プロセスが立てられない ("Failed to find a free participant index")。
+        遠隔PCは zenoh ブリッジ (車両1台につき1つ) + joy + manager + RViz 側 (launch,
+        robot_state_publisher, map container, relay x6, rviz2) で 4台なら 16 個になる。
+      -->
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>99</MaxAutoParticipantIndex>
+    </Discovery>
     <Internal>
       <SocketReceiveBufferSize min="10MB"/>
       <Watermarks>
