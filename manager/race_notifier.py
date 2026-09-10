@@ -1,7 +1,7 @@
 """レース開始・終了の MQTT 通知。
 
 ROS にも Tk にも依存しない。`mosquitto_pub` を別スレッドで叩くだけで、呼び出し側は
-キューに積んで即座に戻る。joy のコールバックを外部 I/O で止めないため (RN-10)。
+キューに積んで即座に戻る。joy のコールバックを外部 I/O で止めないため (RN-11)。
 
 通知の成否は車両の操作に一切影響しない (RN-12)。ブローカに繋がらなくてもログに残す
 だけで、joy の中継は続く。
@@ -139,7 +139,7 @@ class RaceNotifier:
         return self._config.enabled
 
     def publish(self, event: str, stamp_ns: int) -> None:
-        """通知を積む。呼び出し側 (joy のコールバック) をブロックしない (RN-10)。"""
+        """通知を積む。呼び出し側 (joy のコールバック) をブロックしない (RN-11)。"""
         if not self.enabled:
             return
         self._queue.put((race_topic(event), race_payload(event, stamp_ns)))
