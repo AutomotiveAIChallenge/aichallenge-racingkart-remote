@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -29,9 +31,129 @@ LAUNCHER_PID_FILE = REPO_ROOT / "output" / "gui-launcher.pid"
 # 拒否する (LN-15)。
 REMOTE_PID_FILE = REPO_ROOT / "output" / "remote.pid"
 
+# フリートが知っている全車両IDの正本。ここをハードコードすると、大会サーバー側で
+# 車両を増減しても GUI 側の変更が要る (LN-16)。
+VEHICLE_PORTS_PATH = REPO_ROOT / "shared" / "vehicle_ports.sh"
+# .env の REMOTE_VEHICLES で「既定でチェックする車両」を決める。統括SD PCはここに
+# 予備以外の全車を書いておけば、GUI を開いた時点でチェック済みになる (LN-16)。
+ENV_PATH = REPO_ROOT / ".env"
+
+# shared/vehicle_ports.sh が読めない (bash が無い、ファイルが無い、変数が空) 場合の
+# 後退先。以前ハードコードしていた4台と同じにしておく。
+_FALLBACK_VEHICLE_IDS = ["A2", "A3", "A6", "A7"]
+
+
+# --- 車両リストまわりの純粋関数 ---
+
+
+def load_vehicle_ids(vehicle_ports_path: Path) -> List[str]:
+    """`shared/vehicle_ports.sh` の VEHICLE_ID_VALID_LIST を実行時に取り込む (LN-16)。
+
+    大会サーバーがそこへ車両 (例: A4) を足すだけで、GUI のチェックボックスにも
+    コード変更なしに反映される。取得できない場合は警告を stderr に出し、
+    既知の固定リストへ後退する。
+    """
+    try:
+        result = subprocess.run(
+            ["bash", "-c", 'source "$1"; echo "$VEHICLE_ID_VALID_LIST"', "_", str(vehicle_ports_path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(
+            f"[gui_tools] {vehicle_ports_path} の読み込みに失敗しました ({exc})。"
+            f"既定の {_FALLBACK_VEHICLE_IDS} を使います。",
+            file=sys.stderr,
+        )
+        return list(_FALLBACK_VEHICLE_IDS)
+
+    if result.returncode != 0:
+        print(
+            f"[gui_tools] {vehicle_ports_path} の読み込みに失敗しました: "
+            f"{result.stderr.strip()}。既定の {_FALLBACK_VEHICLE_IDS} を使います。",
+            file=sys.stderr,
+        )
+        return list(_FALLBACK_VEHICLE_IDS)
+
+    vehicle_ids = [v for v in re.split(r"[,\s]+", result.stdout.strip()) if v]
+    if not vehicle_ids:
+        print(
+            f"[gui_tools] {vehicle_ports_path} に VEHICLE_ID_VALID_LIST がありません。"
+            f"既定の {_FALLBACK_VEHICLE_IDS} を使います。",
+            file=sys.stderr,
+        )
+        return list(_FALLBACK_VEHICLE_IDS)
+    return vehicle_ids
+
+
+def _parse_env_file(env_path: Path) -> Dict[str, str]:
+    """`.env` を簡易的に KEY=VALUE として読む。docker compose や load_env ほど厳密には
+    扱わず、コメント・空行を無視して値の前後の引用符を剥がすだけ。
+    """
+    values: Dict[str, str] = {}
+    try:
+        lines = env_path.read_text().splitlines()
+    except OSError:
+        return values
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def default_selected_vehicles(env_path: Path, vehicle_ids: List[str]) -> List[str]:
+    """`.env` の REMOTE_VEHICLES から GUI の既定チェックを決める (LN-16)。
+
+    統括SD (fleet supervisor) PC は予備以外の全車両を REMOTE_VEHICLES に書いておけば
+    GUI を開いた時点でチェック済みになる。書かれていない・空の場合は「何も選ばない」。
+    make remote が VEHICLES の既定値を持たないのと同じ理由で、GUI 側も勝手に
+    フルフリートを仮定しない。
+    """
+    raw = _parse_env_file(env_path).get("REMOTE_VEHICLES", "").strip()
+    if not raw:
+        return []
+    known = set(vehicle_ids)
+    selected: List[str] = []
+    for candidate in re.split(r"[,\s]+", raw):
+        if not candidate:
+            continue
+        if candidate not in known:
+            print(
+                f"[gui_tools] REMOTE_VEHICLES の車両ID '{candidate}' は "
+                "shared/vehicle_ports.sh に無いので無視します。",
+                file=sys.stderr,
+            )
+            continue
+        if candidate not in selected:
+            selected.append(candidate)
+    return selected
+
+
+def default_rviz_vehicle(selected_vehicle_ids: List[str], vehicle_ids: List[str]) -> str:
+    """RViz Vehicle コンボボックスの既定値。選択済みの先頭、無ければ全車両の先頭。"""
+    if selected_vehicle_ids:
+        return selected_vehicle_ids[0]
+    if vehicle_ids:
+        return vehicle_ids[0]
+    return ""
+
+
 # 遠隔操作の対象にする実車。Zenoh と Manager は複数台、RViz はこの中の1台を取る。
-VEHICLE_IDS = ["A2", "A3", "A6", "A7"]
-DEFAULT_RVIZ_VEHICLE_ID = "A2"
+# フリートの全車が並び、既定でチェックが入るのは .env の REMOTE_VEHICLES に書かれた
+# 車両だけ (LN-16)。
+VEHICLE_IDS = load_vehicle_ids(VEHICLE_PORTS_PATH)
+DEFAULT_SELECTED_VEHICLE_IDS = default_selected_vehicles(ENV_PATH, VEHICLE_IDS)
+DEFAULT_RVIZ_VEHICLE_ID = default_rviz_vehicle(DEFAULT_SELECTED_VEHICLE_IDS, VEHICLE_IDS)
 
 
 # --- 多重起動防止まわりの純粋関数 (Tk に依存しないので pytest から直接叩ける) ---
@@ -657,9 +779,11 @@ class RemoteGui:
             )
             raise SystemExit(1)
 
-        # 普段使う4台を既定で選ぶ。外した車両は Manager の「全台」と緊急停止の宛先からも外れる。
+        # 既定のチェックは .env の REMOTE_VEHICLES から決める (LN-16)。外した車両は
+        # Manager の「全台」と緊急停止の宛先からも外れる。
         self.vehicle_vars = {
-            vehicle_id: tk.BooleanVar(value=True) for vehicle_id in VEHICLE_IDS
+            vehicle_id: tk.BooleanVar(value=vehicle_id in DEFAULT_SELECTED_VEHICLE_IDS)
+            for vehicle_id in VEHICLE_IDS
         }
         self.rviz_vehicle_id_var = tk.StringVar(value=DEFAULT_RVIZ_VEHICLE_ID)
 

@@ -142,10 +142,13 @@ make rviz-stop
 ```
 
 本体リポジトリの `remote/gui_tools.py` と同じGUIに Manager の列とログを加えたものです。
-上部のチェックボックスで Zenoh / Manager の対象車両を複数選択できます（既定は
-`A2 A3 A6 A7`）。RViz は同時に1台を表示するため、隣の `RViz Vehicle` で表示車両を
-個別に選びます。Manager と Joy は共通起動前段を通すため、`.env`、ROS 2、
-CycloneDDS設定も読み込まれます。
+上部のチェックボックスで Zenoh / Manager の対象車両を複数選択できます。一覧は
+`shared/vehicle_ports.sh` から実行時に読むため、大会サーバー側で車両が増えても
+GUI側の変更は不要です。既定のチェックは `.env` の `REMOTE_VEHICLES` で決まります
+（例: `REMOTE_VEHICLES="A2 A3 A6 A7"`。統括SD PCは予備以外の全車を書いてください。
+未設定なら何も選ばれません）。RViz は同時に1台を表示するため、隣の
+`RViz Vehicle` で表示車両を個別に選びます（既定は選択済み車両の先頭）。Manager と
+Joy は共通起動前段を通すため、`.env`、ROS 2、CycloneDDS設定も読み込まれます。
 
 RVizイメージが無い環境では、最初のRViz起動時だけ `aichallenge-remote-rviz:latest` を
 自動ビルドします。ビルド中の進捗はRVizログに表示されます。

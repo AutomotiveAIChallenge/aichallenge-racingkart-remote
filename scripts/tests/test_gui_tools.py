@@ -61,8 +61,120 @@ def test_combined_restart_uses_both_vehicle_settings():
     )
 
 
-def test_operational_fleet_is_selected_in_stable_order():
-    assert launcher.VEHICLE_IDS == ["A2", "A3", "A6", "A7"]
+def test_operational_fleet_is_selected_in_stable_order(tmp_path):
+    # VEHICLE_IDS はもうハードコードではなく shared/vehicle_ports.sh から読む (LN-16)。
+    # ここではソートし直したりせず、ファイルに書かれた順のまま保つことだけを見る。
+    vehicle_ports = tmp_path / "vehicle_ports.sh"
+    vehicle_ports.write_text('VEHICLE_ID_VALID_LIST="A7, A2, A6, A3"\n')
+    assert launcher.load_vehicle_ids(vehicle_ports) == ["A7", "A2", "A6", "A3"]
+
+
+def test_operational_fleet_is_loaded_from_the_shared_vehicle_ports_file_at_import():
+    assert launcher.VEHICLE_IDS == launcher.load_vehicle_ids(launcher.VEHICLE_PORTS_PATH)
+
+
+# --- LN-16: 車両リストは shared/vehicle_ports.sh、既定選択は .env から ---
+
+
+def test_load_vehicle_ids_reads_the_shared_fleet_list(tmp_path):
+    vehicle_ports = tmp_path / "vehicle_ports.sh"
+    vehicle_ports.write_text('VEHICLE_ID_VALID_LIST="A1, A2, A3, A5, A6, A7, A8"\n')
+    assert launcher.load_vehicle_ids(vehicle_ports) == [
+        "A1",
+        "A2",
+        "A3",
+        "A5",
+        "A6",
+        "A7",
+        "A8",
+    ]
+
+
+def test_load_vehicle_ids_picks_up_a_newly_added_vehicle_with_no_code_change(tmp_path):
+    vehicle_ports = tmp_path / "vehicle_ports.sh"
+    vehicle_ports.write_text('VEHICLE_ID_VALID_LIST="A1, A2, A3, A4, A5, A6, A7, A8"\n')
+    assert "A4" in launcher.load_vehicle_ids(vehicle_ports)
+
+
+def test_load_vehicle_ids_falls_back_when_the_file_is_missing(tmp_path):
+    missing = tmp_path / "does-not-exist.sh"
+    assert launcher.load_vehicle_ids(missing) == ["A2", "A3", "A6", "A7"]
+
+
+def test_load_vehicle_ids_falls_back_when_the_variable_is_empty(tmp_path):
+    vehicle_ports = tmp_path / "vehicle_ports.sh"
+    vehicle_ports.write_text('VEHICLE_ID_VALID_LIST=""\n')
+    assert launcher.load_vehicle_ids(vehicle_ports) == ["A2", "A3", "A6", "A7"]
+
+
+def test_default_selected_vehicles_reads_remote_vehicles_from_env(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text('REMOTE_VEHICLES="A2 A3 A6 A7"\n')
+    vehicle_ids = ["A1", "A2", "A3", "A5", "A6", "A7", "A8"]
+    assert launcher.default_selected_vehicles(env_file, vehicle_ids) == [
+        "A2",
+        "A3",
+        "A6",
+        "A7",
+    ]
+
+
+def test_default_selected_vehicles_accepts_commas_too(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("REMOTE_VEHICLES=A2,A3, A6,A7\n")
+    vehicle_ids = ["A1", "A2", "A3", "A5", "A6", "A7", "A8"]
+    assert launcher.default_selected_vehicles(env_file, vehicle_ids) == [
+        "A2",
+        "A3",
+        "A6",
+        "A7",
+    ]
+
+
+def test_default_selected_vehicles_ignores_unknown_ids(tmp_path, capsys):
+    env_file = tmp_path / ".env"
+    env_file.write_text('REMOTE_VEHICLES="A2 A99"\n')
+    vehicle_ids = ["A1", "A2", "A3"]
+    assert launcher.default_selected_vehicles(env_file, vehicle_ids) == ["A2"]
+    assert "A99" in capsys.readouterr().err
+
+
+def test_default_selected_vehicles_ignores_comments_and_blank_lines(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# 統括SD PC 用\n\nMQTT_HOST=example.com\nREMOTE_VEHICLES=\"A2 A3\"\n"
+    )
+    vehicle_ids = ["A2", "A3"]
+    assert launcher.default_selected_vehicles(env_file, vehicle_ids) == ["A2", "A3"]
+
+
+def test_default_selected_vehicles_selects_nothing_when_env_is_missing(tmp_path):
+    missing = tmp_path / ".env"
+    assert launcher.default_selected_vehicles(missing, ["A2", "A3"]) == []
+
+
+def test_default_selected_vehicles_selects_nothing_when_unset(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("MQTT_HOST=example.com\n")
+    assert launcher.default_selected_vehicles(env_file, ["A2", "A3"]) == []
+
+
+def test_default_selected_vehicles_selects_nothing_when_value_is_empty(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text('REMOTE_VEHICLES=""\n')
+    assert launcher.default_selected_vehicles(env_file, ["A2", "A3"]) == []
+
+
+def test_default_rviz_vehicle_prefers_the_first_selected_vehicle():
+    assert launcher.default_rviz_vehicle(["A3", "A6"], ["A2", "A3", "A6"]) == "A3"
+
+
+def test_default_rviz_vehicle_falls_back_to_the_first_known_vehicle():
+    assert launcher.default_rviz_vehicle([], ["A2", "A3", "A6"]) == "A2"
+
+
+def test_default_rviz_vehicle_is_empty_when_there_are_no_vehicles():
+    assert launcher.default_rviz_vehicle([], []) == ""
 
 
 # --- LN-15: ランチャ GUI と make remote の多重起動防止 ---

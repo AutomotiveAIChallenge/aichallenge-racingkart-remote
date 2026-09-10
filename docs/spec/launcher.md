@@ -16,11 +16,20 @@
 | Joy | `remote_component.bash joy` | GUIが起動したプロセスを停止 | 再起動 | Joy Log |
 | Manager | `remote_component.bash manager` | GUIが起動したプロセスを停止 | 再起動 | Manager Log |
 
-Zenoh / Manager の対象車両は `A2 A3 A6 A7` のチェックボックスで複数選択し、既定では
-4台すべてを選択する。RVizは1台分のprefixだけを剥がして表示するため、専用の
-`RViz Vehicle` で1台を選ぶ。Zenoh / Joy / Manager は `REMOTE_COMPONENT_STDIO=1` で
-共通起動前段を通し、`.env`、ROS 2、`ROS_DOMAIN_ID=0`、CycloneDDS設定を読み込む。
-出力はファイルへリダイレクトせず、基準実装と同じくGUIのログパイプへ渡す。
+Zenoh / Manager の対象車両はチェックボックスで複数選択する。チェックボックスの一覧は
+`shared/vehicle_ports.sh` の `VEHICLE_ID_VALID_LIST` から実行時に読み込む
+（`load_vehicle_ids`）ので、大会サーバー側で車両を増減しても GUI 側のコード変更は
+要らない。既定でチェックが入る車両は `.env` の `REMOTE_VEHICLES` で決める
+（`default_selected_vehicles`）。統括SD (フリート監督) PC はここに予備以外の全車を
+書いておけば、GUI を開いた時点で全台選択になる。未設定・空なら何も選ばれない
+（`make remote` が `VEHICLES` の既定値を持たないのと同じ理由）。RVizは1台分の
+prefixだけを剥がして表示するため、専用の `RViz Vehicle` で1台を選ぶ。既定値は
+選択済み車両の先頭、なければ全車両リストの先頭。
+
+Zenoh / Joy / Manager は `REMOTE_COMPONENT_STDIO=1` で共通起動前段を通し、`.env`、
+ROS 2、`ROS_DOMAIN_ID=0`、CycloneDDS設定を読み込む。出力は基準実装と同じくGUIの
+ログパイプへ渡しつつ、`output/gui-launcher/<component>.log` にも追記する
+（`remote_component.bash` の STDIO モード）。
 
 ## UI
 
