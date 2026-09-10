@@ -11,20 +11,21 @@
 
 | 対象 | Start | Stop | Restart | ログペイン |
 | --- | --- | --- | --- | --- |
-| Zenoh | `connect_zenoh.bash` | GUIが起動したプロセスを停止 | 再接続 | Zenoh Log |
-| RViz | `rviz.bash` | `rviz.bash down` | `rviz.bash restart` | RViz Log |
-| Joy | `joy.bash` | GUIが起動したプロセスを停止 | 再起動 | Joy Log |
+| Zenoh | `remote_component.bash zenoh` | GUIが起動したプロセスを停止 | 再接続 | Zenoh Log |
+| RViz | `rviz.bash <RVIZ_VEHICLE>` | `rviz.bash down` | `rviz.bash restart <RVIZ_VEHICLE>` | RViz Log |
+| Joy | `remote_component.bash joy` | GUIが起動したプロセスを停止 | 再起動 | Joy Log |
 | Manager | `remote_component.bash manager` | GUIが起動したプロセスを停止 | 再起動 | Manager Log |
 
-Vehicle ID は基準実装と同じ1つの入力欄で選び、Zenoh、Zenoh + RViz、Managerへ渡す。
-Manager は `REMOTE_COMPONENT_STDIO=1` で共通起動前段を通し、`.env`、ROS 2、
-`ROS_DOMAIN_ID=0`、CycloneDDS設定を読み込む。出力はファイルへリダイレクトせず、
-基準実装と同じくGUIのログパイプへ渡す。
+Zenoh / Manager の対象車両は `A2 A3 A6 A7` のチェックボックスで複数選択し、既定では
+4台すべてを選択する。RVizは1台分のprefixだけを剥がして表示するため、専用の
+`RViz Vehicle` で1台を選ぶ。Zenoh / Joy / Manager は `REMOTE_COMPONENT_STDIO=1` で
+共通起動前段を通し、`.env`、ROS 2、`ROS_DOMAIN_ID=0`、CycloneDDS設定を読み込む。
+出力はファイルへリダイレクトせず、基準実装と同じくGUIのログパイプへ渡す。
 
 ## UI
 
 - Devias Kit Pro Neon Blue風のダークテーマ、配色、余白、ボタンスタイルを基準実装と揃える。
-- 上部に Vehicle ID と Stop All、コマンドのプレビューを置く。
+- 上部に複数車両のチェックボックス、RViz専用車両、Stop All、コマンドのプレビューを置く。
 - Zenoh / RViz / Joy / Manager / Zenoh and RViz の操作列を横に並べる。
 - Zenoh / RViz / Joy / Manager の4つのログペインを横に並べる。
 - 各ログに状態、Clear、Autoscroll、縦横スクロールを置く。

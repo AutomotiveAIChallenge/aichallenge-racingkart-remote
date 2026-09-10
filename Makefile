@@ -2,7 +2,7 @@
 # 同じ作法で書いている。イメージのビルドは ./docker_build.sh を使う。
 SHELL := /bin/bash
 
-.PHONY: remote remote-stop rviz rviz-stop down ps logs
+.PHONY: remote remote-stop rviz rviz-image rviz-stop down ps logs
 
 # RViz コンテナのユーザーに使う。output/ の生成物がホストユーザー所有になる。
 HOST_UID ?= $(shell id -u)
@@ -79,13 +79,19 @@ remote-stop:
 	fi; \
 	rm -f output/remote.pid
 
-# 遠隔監視 RViz
+# 遠隔監視 RViz。初回やイメージ削除後は必要なイメージだけ自動でビルドする。
 #   make rviz VEHICLE=A3
 # 車両トピックは /<VEHICLE_ID>/... の prefix 付きで届く。VEHICLE を渡すと prefix を
 # 剥がす中継が立ち、その車両が RViz に映る。未指定だと地図しか出ない。
-rviz:
+rviz: rviz-image
 	docker compose stop rviz2
 	RVIZ_VEHICLE_ID="$(VEHICLE)" docker compose up -d rviz2
+
+rviz-image:
+	@if ! docker image inspect aichallenge-remote-rviz:latest >/dev/null 2>&1; then \
+		echo 'RViz image not found; building aichallenge-remote-rviz:latest ...'; \
+		./docker_build.sh rviz; \
+	fi
 
 rviz-stop:
 	docker compose stop rviz2

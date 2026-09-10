@@ -7,9 +7,9 @@
 #   remote_component.bash manager <LOG_DIR> A2 A3 A7 [--brake-test PERCENT]
 #
 # 起動の前段はここだけが持つ (LN-12)。前段とは .env の読み込み・ROS 環境・
-# ROS_DOMAIN_ID・DDS 実装と設定・ログ先を指す。joy.bash は ROS の setup.bash を自分では
-# 読まないので、前段抜きで起こすと ROS が見つからない。.env を読まなければレース通知が
-# 黙って止まる。
+# ROS_DOMAIN_ID・DDS 実装と設定・ログ先を指す。各スクリプトを直接起動する場合にも備えて
+# ROS setup を読むが、共通の環境設定と前提確認はここで行う。.env を読まなければレース
+# 通知が黙って止まる。
 #
 # make remote (run_remote.bash) もランチャ GUI も同じこれを呼ぶ (LN-02, LN-13)。前段が
 # 2箇所にあると、いずれ片方だけが直る。

@@ -35,7 +35,7 @@ manager が使うのは `rclpy` + `sensor_msgs` だけです。Autoware も `rac
 
 ```bash
 cp .env.example .env    # 必要なら編集
-./docker_build.sh rviz  # 遠隔監視イメージ（RViz のみ）
+./docker_build.sh rviz  # 遠隔監視イメージ（省略可。初回の make rviz でも自動ビルド）
 ```
 
 mTLS 素材（zip で別配布）を展開して `tls/` に置いてください。リポジトリには含まれません。
@@ -137,8 +137,13 @@ make rviz-stop
 ```
 
 本体リポジトリの `remote/gui_tools.py` と同じGUIに Manager の列とログを加えたものです。
-上部で Vehicle ID を選び、各コンポーネントを個別に起動・停止・再起動できます。
-Manager は共通起動前段を通すため、`.env`、ROS 2、CycloneDDS設定も読み込まれます。
+上部のチェックボックスで Zenoh / Manager の対象車両を複数選択できます（既定は
+`A2 A3 A6 A7`）。RViz は同時に1台を表示するため、隣の `RViz Vehicle` で表示車両を
+個別に選びます。Manager と Joy は共通起動前段を通すため、`.env`、ROS 2、
+CycloneDDS設定も読み込まれます。
+
+RVizイメージが無い環境では、最初のRViz起動時だけ `aichallenge-remote-rviz:latest` を
+自動ビルドします。ビルド中の進捗はRVizログに表示されます。
 
 プロセスは専用グループで起動され、停止は SIGTERM から SIGKILL へ段階的に進みます。
 Restart は停止完了を待ってから起動します。ログが大量に流れてもGUIを固めないよう、
@@ -152,13 +157,14 @@ Restart は停止完了を待ってから起動します。ログが大量に流
 
 ```bash
 ./scripts/connect_zenoh.bash A3     # 1台に zenoh 接続（再接続なし）
+./scripts/rviz.bash A3              # RViz だけ起動（A3を表示）
 ./scripts/rviz.bash                 # RViz だけ起動（地図のみ）
 ./scripts/restart.bash A3           # RViz を上げ直して A3 に繋ぎ直す
 ```
 
 `make remote` が複数台をまとめて扱う（`run_zenoh.bash`、再接続あり）のに対し、
-`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。`rviz.bash` は VEHICLE を
-渡せないので地図しか出ません。車両を映すなら `make rviz VEHICLE=A3` を使ってください。
+`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。RVizで車両を映す場合は
+`rviz.bash A3` または `make rviz VEHICLE=A3` のように1台を指定します。
 
 ## ディレクトリ構成
 

@@ -9,9 +9,9 @@ MAKE_DIR="${REPO_ROOT}"
 usage() {
     cat <<'USAGE'
 Usage:
-  rviz.bash            # start RViz stack via make rviz
-  rviz.bash down       # stop and remove rviz2 service
-  rviz.bash restart    # restart rviz2 service
+  rviz.bash [VEHICLE]          # start RViz stack via make rviz
+  rviz.bash down               # stop and remove rviz2 service
+  rviz.bash restart [VEHICLE]  # restart rviz2 service
 USAGE
 }
 
@@ -45,25 +45,30 @@ if [ $# -gt 0 ]; then
         usage
         exit 0
         ;;
-    *)
-        echo "Error: unknown argument '$1'." >&2
-        usage
-        exit 1
-        ;;
     esac
 fi
 
-if [ $# -gt 0 ]; then
+if [ $# -gt 1 ]; then
     echo "Error: too many arguments." >&2
     usage
     exit 1
 fi
+vehicle_id="${1-}"
+
+if [ -n "${vehicle_id}" ]; then
+    # shellcheck source-path=SCRIPTDIR source=../shared/vehicle_ports.sh
+    source "${REPO_ROOT}/shared/vehicle_ports.sh"
+    if ! zenoh_port_for_vehicle_id "${vehicle_id}" >/dev/null; then
+        echo "Error: invalid VEHICLE '${vehicle_id}' (valid: ${VEHICLE_ID_VALID_LIST})." >&2
+        exit 1
+    fi
+fi
 
 case "${mode}" in
 start)
-    echo "Running 'make rviz' inside '${MAKE_DIR}'."
+    echo "Running 'make rviz VEHICLE=${vehicle_id}' inside '${MAKE_DIR}'."
     cd "${MAKE_DIR}"
-    make rviz
+    make rviz VEHICLE="${vehicle_id}"
     ;;
 down)
     echo "Stopping and removing 'rviz2' service."
@@ -74,9 +79,9 @@ restart)
     echo "Restarting 'rviz2' service."
     cd "${MAKE_DIR}"
     docker compose rm -f -s rviz2
-    echo "Running 'make rviz' inside '${MAKE_DIR}' after restart."
+    echo "Running 'make rviz VEHICLE=${vehicle_id}' inside '${MAKE_DIR}' after restart."
     cd "${MAKE_DIR}"
-    make rviz
+    make rviz VEHICLE="${vehicle_id}"
     ;;
 *)
     echo "Error: unsupported mode '${mode}'." >&2

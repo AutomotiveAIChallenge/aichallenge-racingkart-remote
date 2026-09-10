@@ -20,15 +20,9 @@ from tkinter.scrolledtext import ScrolledText
 ROOT_DIR = Path(__file__).resolve().parent
 REMOTE_DIR = ROOT_DIR
 
-DEFAULT_VEHICLE_ID = "A2"
-# connect_zenoh.bash の case が受理する Vehicle ID。A4 は無い点に注意。
-# ここを緩くするとスクリプト側で「無効な名前空間です」と落ちるだけになるので、
-# 候補一覧と検証を同じ定義から導いて食い違わないようにする。
-VEHICLE_IDS = ["A1", "A2", "A3", "A5", "A6", "A7", "A8"]
-TEST_VEHICLE_IDS = ["test-remote", "test-vehicle", "test-server"]
-VALID_VEHICLE_IDS = VEHICLE_IDS + TEST_VEHICLE_IDS
-# Combobox に出す候補 (実車 ID を先に、test-* を後ろに)。
-VEHICLE_ID_CHOICES = VALID_VEHICLE_IDS
+# 遠隔操作の対象にする実車。Zenoh と Manager は複数台、RViz はこの中の1台を取る。
+VEHICLE_IDS = ["A2", "A3", "A6", "A7"]
+DEFAULT_RVIZ_VEHICLE_ID = "A2"
 
 # --- ウィンドウ ---
 WINDOW_GEOMETRY = "1100x680"
@@ -368,7 +362,8 @@ class CommandSpec:
     label: str
     command: str | None = None
     log_key: str | None = None
-    requires_vehicle: bool = False
+    requires_vehicles: bool = False
+    requires_rviz_vehicle: bool = False
     stop_before: bool = False
     note: str | None = None
     kind: str = "command"  # command, stop, stop_all
@@ -377,19 +372,25 @@ class CommandSpec:
     # "Stop RViz" は `./rviz.bash down` を実行する kind="command" だが role="stop"。
     role: str = "start"  # start, stop, restart
 
-    def render(self, vehicle_id: str) -> str:
+    def render(self, vehicle_ids: List[str], rviz_vehicle_id: str) -> str:
         if self.kind != "command":
             return ""
         assert self.command is not None
-        return self.command.format(vehicle_id=vehicle_id)
+        return self.command.format(
+            vehicle_ids=" ".join(vehicle_ids),
+            rviz_vehicle_id=rviz_vehicle_id,
+        )
 
 COMMANDS: List[CommandSpec] = [
     CommandSpec(
         label="Start Zenoh",
-        command="./connect_zenoh.bash {vehicle_id}",
+        command=(
+            'REMOTE_COMPONENT_STDIO=1 ./remote_component.bash zenoh '
+            '../output/gui-launcher "{vehicle_ids}"'
+        ),
         log_key="zenoh",
-        requires_vehicle=True,
-        note="指定した Vehicle ID の zenoh-bridge へ接続します。",
+        requires_vehicles=True,
+        note="選択した全車両の zenoh-bridge へ接続します。",
     ),
     CommandSpec(
         label="Stop Zenoh",
@@ -401,26 +402,35 @@ COMMANDS: List[CommandSpec] = [
     CommandSpec(
         label="Restart Zenoh",
         role="restart",
-        command="./connect_zenoh.bash {vehicle_id}",
+        command=(
+            'REMOTE_COMPONENT_STDIO=1 ./remote_component.bash zenoh '
+            '../output/gui-launcher "{vehicle_ids}"'
+        ),
         log_key="zenoh",
-        requires_vehicle=True,
+        requires_vehicles=True,
         stop_before=True,
-        note="既存プロセス停止後に zenoh bridge を再接続します。",
+        note="既存プロセス停止後、選択した全車両へ再接続します。",
     ),
     CommandSpec(
         label="Restart Zenoh and RViz",
         role="restart",
-        command="./restart.bash {vehicle_id}",
+        command=(
+            "./rviz.bash restart {rviz_vehicle_id} && "
+            "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash zenoh "
+            '../output/gui-launcher "{vehicle_ids}"'
+        ),
         log_key="zenoh",
-        requires_vehicle=True,
+        requires_vehicles=True,
+        requires_rviz_vehicle=True,
         stop_before=True,
-        note="RViz と Zenoh bridge を再起動します。",
+        note="RViz と、選択した全車両の Zenoh bridge を再起動します。",
     ),
     CommandSpec(
         label="Start RViz",
-        command="./rviz.bash",
+        command="./rviz.bash {rviz_vehicle_id}",
         log_key="rviz",
-        note="RViz 用コンテナを起動します。",
+        requires_rviz_vehicle=True,
+        note="RViz 用コンテナを指定車両の表示設定で起動します。",
     ),
     CommandSpec(
         label="Stop RViz",
@@ -433,13 +443,17 @@ COMMANDS: List[CommandSpec] = [
     CommandSpec(
         label="Restart RViz",
         role="restart",
-        command="./rviz.bash restart",
+        command="./rviz.bash restart {rviz_vehicle_id}",
         log_key="rviz",
-        note="RViz コンテナを再起動します。",
+        requires_rviz_vehicle=True,
+        note="RViz コンテナを指定車両の表示設定で再起動します。",
     ),
     CommandSpec(
         label="Start Joy",
-        command="./joy.bash",
+        command=(
+            "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash joy "
+            "../output/gui-launcher"
+        ),
         log_key="joy",
         note="ゲームパッドノードを起動します。",
     ),
@@ -453,7 +467,10 @@ COMMANDS: List[CommandSpec] = [
     CommandSpec(
         label="Restart Joy",
         role="restart",
-        command="./joy.bash",
+        command=(
+            "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash joy "
+            "../output/gui-launcher"
+        ),
         log_key="joy",
         stop_before=True,
         note="joy ノードを再起動します。",
@@ -462,11 +479,11 @@ COMMANDS: List[CommandSpec] = [
         label="Start Manager",
         command=(
             "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash manager "
-            "../output/gui-launcher {vehicle_id}"
+            "../output/gui-launcher {vehicle_ids}"
         ),
         log_key="manager",
-        requires_vehicle=True,
-        note="指定した Vehicle ID を操作する manager を起動します。",
+        requires_vehicles=True,
+        note="選択した全車両を操作する manager を起動します。",
     ),
     CommandSpec(
         label="Stop Manager",
@@ -480,10 +497,10 @@ COMMANDS: List[CommandSpec] = [
         role="restart",
         command=(
             "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash manager "
-            "../output/gui-launcher {vehicle_id}"
+            "../output/gui-launcher {vehicle_ids}"
         ),
         log_key="manager",
-        requires_vehicle=True,
+        requires_vehicles=True,
         stop_before=True,
         note="manager を再起動します。",
     ),
@@ -548,8 +565,11 @@ class RemoteGui:
             )
             raise SystemExit(1)
 
-        self.vehicle_id_var = tk.StringVar(value=DEFAULT_VEHICLE_ID)
-        # SSH user input was removed from the UI entirely; there is nothing to keep here anymore.
+        # 普段使う4台を既定で選ぶ。外した車両は Manager の「全台」と緊急停止の宛先からも外れる。
+        self.vehicle_vars = {
+            vehicle_id: tk.BooleanVar(value=True) for vehicle_id in VEHICLE_IDS
+        }
+        self.rviz_vehicle_id_var = tk.StringVar(value=DEFAULT_RVIZ_VEHICLE_ID)
 
         self.processes: Dict[str, _ProcessEntry] = {}
         # self.processes への「世代を見てから消す」操作はリーダースレッドとメイン
@@ -597,15 +617,26 @@ class RemoteGui:
         top_frame = ttk.Frame(container, style="TFrame")
         top_frame.pack(fill=tk.X, padx=10, pady=(10, 6))
 
-        ttk.Label(top_frame, text="Vehicle ID:", style="TLabel").pack(side=tk.LEFT)
-        # state="normal" のまま候補を出す。test-* は候補に無いので手入力できる必要がある。
-        vehicle_entry = ttk.Combobox(
-            top_frame,
-            textvariable=self.vehicle_id_var,
-            values=VEHICLE_ID_CHOICES,
-            width=12,
+        ttk.Label(top_frame, text="Vehicles:", style="TLabel").pack(side=tk.LEFT)
+        for vehicle_id in VEHICLE_IDS:
+            ttk.Checkbutton(
+                top_frame,
+                text=vehicle_id,
+                variable=self.vehicle_vars[vehicle_id],
+                style="Devias.TCheckbutton",
+            ).pack(side=tk.LEFT, padx=(6, 0))
+
+        ttk.Label(top_frame, text="RViz Vehicle:", style="TLabel").pack(
+            side=tk.LEFT, padx=(20, 0)
         )
-        vehicle_entry.pack(side=tk.LEFT, padx=(6, 16))
+        rviz_vehicle_entry = ttk.Combobox(
+            top_frame,
+            textvariable=self.rviz_vehicle_id_var,
+            values=VEHICLE_IDS,
+            width=6,
+            state="readonly",
+        )
+        rviz_vehicle_entry.pack(side=tk.LEFT, padx=(6, 16))
 
         self.stop_all_button = ttk.Button(
             top_frame,
@@ -751,11 +782,15 @@ class RemoteGui:
         self._stop_process(log_key)
 
     def _handle_command(self, spec: CommandSpec) -> None:
-        vehicle_id = self.vehicle_id_var.get().strip()
+        vehicle_ids = [
+            vehicle_id
+            for vehicle_id in VEHICLE_IDS
+            if self.vehicle_vars[vehicle_id].get()
+        ]
+        rviz_vehicle_id = self.rviz_vehicle_id_var.get().strip()
 
-        # 停止は log_key で追跡中のプロセスを畳むだけで vehicle_id を使わない。
-        # Vehicle ID 検証より先に処理する: ID 欄は手入力できる (test-* のため) ので、
-        # 起動後に不正な値を打たれると検証で弾かれて Stop が押せなくなる。
+        # 停止は log_key で追跡中のプロセスを畳むだけで車両設定を使わない。
+        # 車両検証より先に処理し、設定にかかわらず必ず停止できるようにする。
         if spec.kind == "stop":
             if not spec.log_key:
                 return
@@ -764,19 +799,14 @@ class RemoteGui:
             self._refresh_button_states()
             return
 
-        if spec.requires_vehicle:
-            if not vehicle_id:
-                messagebox.showwarning("入力不足", "Vehicle ID を指定してください。")
-                return
-            if vehicle_id not in VALID_VEHICLE_IDS:
-                messagebox.showwarning(
-                    "Vehicle ID が不正です",
-                    f"指定できるのは {', '.join(VALID_VEHICLE_IDS)} のいずれかです。"
-                    f"\n(入力値: {vehicle_id!r})",
-                )
-                return
+        if spec.requires_vehicles and not vehicle_ids:
+            messagebox.showwarning("入力不足", "対象車両を1台以上選択してください。")
+            return
+        if spec.requires_rviz_vehicle and rviz_vehicle_id not in VEHICLE_IDS:
+            messagebox.showwarning("入力不足", "RViz Vehicleを選択してください。")
+            return
 
-        command_text = spec.render(vehicle_id)
+        command_text = spec.render(vehicle_ids, rviz_vehicle_id)
         working_dir = REMOTE_DIR
         note = spec.note or ""
         self._update_preview(working_dir, command_text, note)
