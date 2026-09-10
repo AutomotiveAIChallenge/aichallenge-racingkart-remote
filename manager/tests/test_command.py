@@ -32,6 +32,7 @@ from racing_kart_manager_core import (
     JoyValue,
     advance_command,
     apply_command,
+    latest_request,
     transform,
 )
 
@@ -144,6 +145,33 @@ def test_t44_a_later_command_replaces_the_one_in_flight():
     assert overlays[:2] == [COMMAND_RACE_START] * 2
     assert overlays[2 : 2 + COMMAND_REPEAT] == [COMMAND_RACE_FINISH] * COMMAND_REPEAT
     assert overlays[2 + COMMAND_REPEAT :] == [None]
+
+
+# --------------------------------------------------------------------------
+# キューの間引き (T-44b)
+# --------------------------------------------------------------------------
+
+
+def test_t44b_latest_request_keeps_only_the_newest():
+    """T-44b: 次の joy を迎える前に複数回押されたら、最新の指令だけを残す (REQ-34)。
+
+    開始→終了と連打したのに古い方 (開始) を採用すると、終了が1フレーム遅れて出る
+    うえ、まだ一度も重ねていない開始が通知されてしまう。
+    """
+    latest, dropped = latest_request([COMMAND_RACE_START, COMMAND_RACE_FINISH])
+
+    assert latest == COMMAND_RACE_FINISH
+    assert dropped == (COMMAND_RACE_START,)
+
+
+def test_t44c_latest_request_of_a_single_pending_command():
+    """1件しか溜まっていなければそのまま返し、捨てるものは無い。"""
+    assert latest_request([COMMAND_RACE_START]) == (COMMAND_RACE_START, ())
+
+
+def test_t44d_latest_request_of_nothing_pending():
+    """何も溜まっていなければ None で、捨てるものも無い。"""
+    assert latest_request([]) == (None, ())
 
 
 # --------------------------------------------------------------------------

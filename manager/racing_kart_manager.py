@@ -43,6 +43,7 @@ from racing_kart_manager_core import (
     advance_command,
     apply_command,
     brake_test_engaged,
+    latest_request,
     parse_vehicles,
     transform,
     with_brake_test,
@@ -117,15 +118,24 @@ class RacingKartManagerNode(Node):
         self._requests.put(command)
 
     def _take_request(self) -> "str | None":
-        """溜まっている指令を1つだけ採る。
+        """溜まっている指令を全部採り、最新の1つだけを残す (REQ-34)。
 
-        1フレームに1つに絞る。連打しても押した順に1つずつ処理され、押下1回につき
-        通知1回が保たれる (RN-16)。joy は 20Hz で来るので溜まっても順に捌ける。
+        joy が来ない間に開始→終了のように複数回押されることがある。古い方を採用すると
+        あとの指令が1フレーム遅れて出てしまい、しかもまだ一度も重ねていない古い指令の
+        通知まで出てしまう。キューを空にして最新だけを使い、それ以外は捨てる。捨てた
+        指令は通知を出さずに INFO ログへ残すだけにする (joy レベルでは黙って落とす)。
         """
-        try:
-            return self._requests.get_nowait()
-        except queue.Empty:
-            return None
+        pending = []
+        while True:
+            try:
+                pending.append(self._requests.get_nowait())
+            except queue.Empty:
+                break
+
+        latest, dropped = latest_request(pending)
+        for command in dropped:
+            self.get_logger().info(f"dropped superseded command {command}")
+        return latest
 
     def _on_joy(self, msg: Joy) -> None:
         """joy 受信が唯一の publish 契機 (REQ-13)。

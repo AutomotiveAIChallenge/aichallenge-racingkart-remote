@@ -260,6 +260,21 @@ COMMAND_EVENTS: dict[str, str] = {
 COMMAND_REPEAT = 10
 
 
+def latest_request(requests: "list[str]") -> tuple[Optional[str], tuple[str, ...]]:
+    """溜まっている指令の要求から、最新の1つだけを残す (REQ-34)。
+
+    次の joy を迎えるまでの間に GUI から複数回押される (例: 開始のあと、joy が来ない
+    うちに終了を押す) ことがある。古い方を採用すると、あとの指令が1フレーム遅れて
+    出てしまう。ここで最新だけを残し、それ以外は捨てる。捨てた指令は呼び出し側が
+    ログに残せるよう、そのまま返す。まだ一度も joy へ重ねていないので、これらの指令は
+    レース通知も出ない (RN-16)。
+    """
+    pending = tuple(requests)
+    if not pending:
+        return None, ()
+    return pending[-1], pending[:-1]
+
+
 @dataclass(frozen=True)
 class CommandState:
     """一斉指令の残り。ROS の実行スレッドの中だけで読み書きする。"""
