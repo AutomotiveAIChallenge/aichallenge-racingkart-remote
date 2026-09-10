@@ -15,7 +15,10 @@
 # 2箇所にあると、いずれ片方だけが直る。
 #
 # 通常は出力をすべて <LOG_DIR>/remote/<name>.log に入れる。旧 GUI と同じパイプ式の
-# ランチャから呼ぶ場合だけ REMOTE_COMPONENT_STDIO=1 とし、呼び出し元に出力を渡す。
+# ランチャから呼ぶ場合だけ REMOTE_COMPONENT_STDIO=1 とし、呼び出し元にも出力を渡す。
+# ただし STDIO モードでも <LOG_DIR>/remote/<name>.log への追記は続ける (tee)。GUI を
+# 閉じるとパイプ側の出力は消えるため、ログファイルが無いと「joy がつながらない」と
+# いった現場障害を後から追えなくなる (LN-17)。
 #
 # 仕様: docs/spec/launcher.md
 set -eo pipefail
@@ -133,8 +136,12 @@ shift
 out_dir="${log_dir}/remote"
 mkdir -p "${out_dir}"
 
-# ここから先の出力は通常ログへ。GUI は自分のログペインへ流すのでリダイレクトしない。
-if [ "${REMOTE_COMPONENT_STDIO:-0}" != "1" ]; then
+# ここから先の出力はログへ。STDIO モードは GUI のログペインにも流しつつ、tee で
+# ファイルへの追記も続ける (LN-17)。GUI 経由の起動でも、あとから故障解析できるように
+# するためで、GUI を閉じてもログファイルには残る。
+if [ "${REMOTE_COMPONENT_STDIO:-0}" = "1" ]; then
+    exec > >(tee -a "${out_dir}/${component}.log") 2>&1
+else
     exec >>"${out_dir}/${component}.log" 2>&1
 fi
 echo "[remote_component] $(date '+%Y-%m-%d %H:%M:%S') starting ${component}"

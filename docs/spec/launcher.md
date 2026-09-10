@@ -28,8 +28,9 @@ prefixだけを剥がして表示するため、専用の `RViz Vehicle` で1台
 
 Zenoh / Joy / Manager は `REMOTE_COMPONENT_STDIO=1` で共通起動前段を通し、`.env`、
 ROS 2、`ROS_DOMAIN_ID=0`、CycloneDDS設定を読み込む。出力は基準実装と同じくGUIの
-ログパイプへ渡しつつ、`output/gui-launcher/<component>.log` にも追記する
-（`remote_component.bash` の STDIO モード）。
+ログパイプへ渡しつつ、`output/gui-launcher/remote/<component>.log` にも `tee` で
+追記する（`remote_component.bash` の STDIO モード）。GUI を閉じるとログペインの
+内容は失われるが、ファイルには残るので、あとから故障解析できる。
 
 ## UI
 
