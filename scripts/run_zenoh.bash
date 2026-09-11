@@ -12,6 +12,15 @@
 # 見える形に置いておきたいため。
 set -eo pipefail
 
+if [ ! -f /opt/ros/humble/setup.bash ]; then
+    echo "Error: ROS 2 Humble が見つかりません (/opt/ros/humble)。" >&2
+    exit 1
+fi
+
+# 端末から直接起動した場合も ROS_DISTRO などを設定する。
+# shellcheck disable=SC1091
+source /opt/ros/humble/setup.bash
+
 if [ "$#" -lt 1 ] || [ -z "${1}" ]; then
     echo 'usage: run_zenoh.bash "A2 A3 A7" [LOG_DIR]' >&2
     exit 1
@@ -45,6 +54,23 @@ for vehicle_id in "${vehicles[@]}"; do
         exit 1
     fi
 done
+
+# zenoh本体に渡して長いエラーを出させる前に、配布物の展開漏れをまとめて示す。
+required_tls_files=(
+    "${tls_root}/tls/client/cert.pem"
+    "${tls_root}/tls/client/key.pem"
+    "${tls_root}/tls/server/minica.pem"
+)
+missing_tls_files=()
+for tls_file in "${required_tls_files[@]}"; do
+    [ -f "${tls_file}" ] || missing_tls_files+=("${tls_file}")
+done
+if [ "${#missing_tls_files[@]}" -gt 0 ]; then
+    echo "Error: Zenoh接続用のmTLS素材がありません:" >&2
+    printf '  %s\n' "${missing_tls_files[@]}" >&2
+    echo "別途配布されたzipを tls/ に展開するか、TLS_ROOTを設定してください。" >&2
+    exit 1
+fi
 
 mkdir -p "${out_dir}"
 
