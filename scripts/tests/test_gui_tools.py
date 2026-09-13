@@ -6,6 +6,7 @@ import os
 import pathlib
 import subprocess
 import sys
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -21,9 +22,7 @@ def test_manager_has_start_stop_and_restart_commands():
 
 
 def test_manager_uses_the_common_component_preamble():
-    command = launcher.SPEC_MAP["Start Manager"].render(
-        ["A2", "A3", "A6", "A7"], "A3"
-    )
+    command = launcher.SPEC_MAP["Start Manager"].render(["A2", "A3", "A6", "A7"])
     assert command == (
         "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash manager "
         "../output/gui-launcher A2 A3 A6 A7"
@@ -38,26 +37,10 @@ def test_manager_is_added_to_the_controls_and_logs():
 
 
 def test_zenoh_receives_all_selected_vehicles():
-    command = launcher.SPEC_MAP["Start Zenoh"].render(["A2", "A6", "A7"], "A3")
+    command = launcher.SPEC_MAP["Start Zenoh"].render(["A2", "A6", "A7"])
     assert command == (
         "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash zenoh "
         '../output/gui-launcher "A2 A6 A7"'
-    )
-
-
-def test_rviz_uses_its_separate_vehicle():
-    command = launcher.SPEC_MAP["Start RViz"].render(["A2", "A6"], "A7")
-    assert command == "./rviz.bash A7"
-
-
-def test_combined_restart_uses_both_vehicle_settings():
-    command = launcher.SPEC_MAP["Restart Zenoh and RViz"].render(
-        ["A2", "A3", "A6", "A7"], "A6"
-    )
-    assert command == (
-        "./rviz.bash restart A6 && "
-        "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash zenoh "
-        '../output/gui-launcher "A2 A3 A6 A7"'
     )
 
 
@@ -152,15 +135,34 @@ def test_remote_stack_pid_is_none_once_the_group_has_exited(tmp_path):
 
 def test_command_touches_remote_component_for_zenoh_joy_manager():
     for label in ("Start Zenoh", "Restart Joy", "Start Manager"):
-        command = launcher.SPEC_MAP[label].render(["A2"], "A2")
+        command = launcher.SPEC_MAP[label].render(["A2"])
         assert launcher.command_touches_remote_component(command) is True
 
 
-def test_command_touches_remote_component_is_false_for_rviz_alone():
-    command = launcher.SPEC_MAP["Start RViz"].render(["A2"], "A2")
-    assert launcher.command_touches_remote_component(command) is False
+# --- RC13: 孤児 joy_node の掃除 ---
 
 
-def test_command_touches_remote_component_is_true_for_combined_restart():
-    command = launcher.SPEC_MAP["Restart Zenoh and RViz"].render(["A2"], "A2")
-    assert launcher.command_touches_remote_component(command) is True
+def test_unregistered_log_key_does_not_call_pkill():
+    # zenoh/manager は明示登録が無い。無関係なプロセスを巻き込まないよう pkill 自体を
+    # 呼ばない。
+    with mock.patch("gui_tools.subprocess.run") as run:
+        assert launcher.kill_orphan_pattern("manager") is False
+    run.assert_not_called()
+
+
+def test_joy_is_registered_and_uses_pkill_dash_f():
+    assert "joy" in launcher.ORPHAN_KILL_PATTERNS
+    completed = mock.Mock(returncode=0)
+    with mock.patch("gui_tools.subprocess.run", return_value=completed) as run:
+        assert launcher.kill_orphan_pattern("joy") is True
+    run.assert_called_once()
+    args, kwargs = run.call_args
+    assert args[0] == ["pkill", "-f", launcher.ORPHAN_KILL_PATTERNS["joy"]]
+    assert kwargs.get("timeout") == 3.0
+
+
+def test_no_match_returns_false():
+    # pkill は該当プロセスが無いと非0を返す。誤って「掃除した」とログしないための境界。
+    completed = mock.Mock(returncode=1)
+    with mock.patch("gui_tools.subprocess.run", return_value=completed):
+        assert launcher.kill_orphan_pattern("joy") is False

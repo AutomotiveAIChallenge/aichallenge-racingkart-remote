@@ -1,14 +1,10 @@
 # 遠隔操作PC用の Makefile。本体リポジトリ (aichallenge-racingkart) の Makefile と
-# 同じ作法で書いている。イメージのビルドは ./docker_build.sh を使う。
+# 同じ作法で書いている。
 SHELL := /bin/bash
 
-.PHONY: remote remote-stop rviz rviz-image rviz-stop down ps logs
+.PHONY: remote remote-stop ps logs
 
-# RViz コンテナのユーザーに使う。output/ の生成物がホストユーザー所有になる。
-HOST_UID ?= $(shell id -u)
-HOST_GID ?= $(shell id -g)
-export HOST_UID HOST_GID
-# ホストシェルの ROS_DOMAIN_ID が compose 補間や子プロセスに漏れるのを防ぐ。
+# ホストシェルの ROS_DOMAIN_ID が子プロセスに漏れるのを防ぐ。
 # 遠隔側は常に 0 で、run_zenoh.bash も 0 に固定している。変える口は用意しない。
 unexport ROS_DOMAIN_ID
 
@@ -23,9 +19,9 @@ TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
 # 対象車両に既定値を置かない。GUI の「全台」も緊急停止の宛先もここで決まるため。
 # 遠隔側は常に ROS_DOMAIN_ID 0。車両側の domain とは無関係で、車両IDで区別する。
 #
-# RViz 以外はコンテナに入れずホストで動かす。setsid で端末から切り離すので make が
-# 返っても生き残る。setsid によって run_remote.bash がセッションリーダーになり、
-# 子も孫も同じプロセスグループに入る。停止はそのグループごと畳む (remote-stop)。
+# すべてホストで動かす。setsid で端末から切り離すので make が返っても生き残る。
+# setsid によって run_remote.bash がセッションリーダーになり、子も孫も同じ
+# プロセスグループに入る。停止はそのグループごと畳む (remote-stop)。
 # ホストに ROS 2 Humble と zenoh-bridge-ros2dds が入っていること (README 参照)。
 # 前提の確認は remote_component.bash check が持つ。Makefile・ランチャ GUI・起動時の
 # 3者が同じものを呼ぶので、確認の内容が散らばらない。
@@ -89,27 +85,6 @@ remote-stop:
 	fi; \
 	rm -f output/remote.pid
 
-# 遠隔監視 RViz。初回やイメージ削除後は必要なイメージだけ自動でビルドする。
-#   make rviz VEHICLE=A3
-# 車両トピックは /<VEHICLE_ID>/... の prefix 付きで届く。VEHICLE を渡すと prefix を
-# 剥がす中継が立ち、その車両が RViz に映る。未指定だと地図しか出ない。
-rviz: rviz-image
-	docker compose stop rviz2
-	RVIZ_VEHICLE_ID="$(VEHICLE)" docker compose up -d rviz2
-
-rviz-image:
-	@if ! docker image inspect aichallenge-remote-rviz:latest >/dev/null 2>&1; then \
-		echo 'RViz image not found; building aichallenge-remote-rviz:latest ...'; \
-		./docker_build.sh rviz; \
-	fi
-
-rviz-stop:
-	docker compose stop rviz2
-
-down:
-	docker compose down --remove-orphans
-
-# ホスト側はプロセスグループの中身をそのまま出す。コンテナは RViz だけ。
 ps:
 	@pid=$$(cat output/remote.pid 2>/dev/null); \
 	if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
@@ -124,8 +99,6 @@ ps:
 	else \
 		echo "launcher: down"; \
 	fi
-	@echo
-	@docker compose ps
 
 logs:
 	tail -f output/latest/remote/manager.log

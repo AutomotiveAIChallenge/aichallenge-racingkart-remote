@@ -10,6 +10,9 @@
 //// 起動しているので、車両の DDS ドメイン内では `/racing_kart/sd/joy` に戻る。
 //// このブリッジ自身には名前空間を付けない。それが両者を噛み合わせている。
 ////
+//// 受信側 (subscribers) は持たない。このリポジトリ (remote) は joy の送出だけを担い、
+//// 車両からのテレメトリを購読・可視化する役目は持たない。
+////
 {
   plugins: {
     ////
@@ -65,19 +68,8 @@
           "/__VEHICLE_ID__/initialpose",
           "/__VEHICLE_ID__/racing_kart/sd/joy"
         ],
-        subscribers: [
-          "/__VEHICLE_ID__/control/command/control_cmd",
-          "/__VEHICLE_ID__/localization/kinematic_state",
-          "/__VEHICLE_ID__/planning/scenario_planning/trajectory",
-          "/__VEHICLE_ID__/v2x/vehicle_positions/markers",
-          "/__VEHICLE_ID__/racing_kart/debug/status",
-          "/__VEHICLE_ID__/tf",
-          "/__VEHICLE_ID__/tf_static",
-          "/__VEHICLE_ID__/vehicle/status/control_mode",
-          "/__VEHICLE_ID__/vehicle/status/gear_status",
-          "/__VEHICLE_ID__/vehicle/status/steering_status",
-          "/__VEHICLE_ID__/vehicle/status/velocity_status"
-        ],
+        // 受信側は持たない。車両からのテレメトリはこのリポジトリの役目ではない。
+        subscribers: [],
         service_servers: [],
         service_clients: [],
         action_servers: [],
