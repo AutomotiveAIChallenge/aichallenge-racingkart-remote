@@ -2,7 +2,7 @@
 # 同じ作法で書いている。イメージのビルドは ./docker_build.sh を使う。
 SHELL := /bin/bash
 
-.PHONY: remote remote-stop rviz rviz-stop down ps logs
+.PHONY: remote remote-stop rviz rviz-image rviz-stop down ps logs
 
 # RViz コンテナのユーザーに使う。output/ の生成物がホストユーザー所有になる。
 HOST_UID ?= $(shell id -u)
@@ -27,24 +27,27 @@ TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
 # 返っても生き残る。setsid によって run_remote.bash がセッションリーダーになり、
 # 子も孫も同じプロセスグループに入る。停止はそのグループごと畳む (remote-stop)。
 # ホストに ROS 2 Humble と zenoh-bridge-ros2dds が入っていること (README 参照)。
+# 前提の確認は remote_component.bash check が持つ。Makefile・ランチャ GUI・起動時の
+# 3者が同じものを呼ぶので、確認の内容が散らばらない。
 #
 # 起動前に remote-stop を通す。remote.pid は上書きされるので、止め忘れたまま重ねて
 # 起動すると前のグループが追跡不能な孤児になる (GUI が二枚出て joy を取り合う)。
+#
+# ランチャ GUI (scripts/gui_tools.py) が動いている間はここで止める。GUI は個別に
+# zenoh/joy/manager を起動できるので、知らずに make remote を重ねると joy publisher が
+# 二重になる。GUI 側も同じ理由で output/remote.pid を見て自分からの起動・再起動を拒否する
+# (両方向のガード。詳細は docs/spec/launcher.md)。
 remote:
 	@test -n "$(VEHICLES)" || { \
 		echo 'Error: VEHICLES を指定してください。  例: make remote VEHICLES="A2 A3 A7"' >&2; \
 		exit 1; \
 	}
-	@test -f /opt/ros/humble/setup.bash || { \
-		echo 'Error: ROS 2 Humble が見つかりません (/opt/ros/humble)。' >&2; \
-		echo '       sudo apt install ros-humble-ros-base ros-humble-joy python3-tk' >&2; \
+	@./scripts/remote_component.bash check
+	@pid=$$(cat output/gui-launcher.pid 2>/dev/null); \
+	if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+		echo "Error: ランチャ GUI (scripts/gui_tools.py, PID $$pid) が動いています。GUI を閉じてから make remote してください。" >&2; \
 		exit 1; \
-	}
-	@command -v zenoh-bridge-ros2dds >/dev/null || { \
-		echo 'Error: zenoh-bridge-ros2dds が見つかりません。' >&2; \
-		echo '       sudo dpkg -i vendor/zenoh-bridge-ros2dds_1.5.0_amd64.deb' >&2; \
-		exit 1; \
-	}
+	fi
 	@$(MAKE) --no-print-directory remote-stop
 	@mkdir -p output/$(TIMESTAMP)/remote output/latest
 	@ln -sfn "$(PWD)/output/$(TIMESTAMP)/remote" output/latest/remote
@@ -86,13 +89,19 @@ remote-stop:
 	fi; \
 	rm -f output/remote.pid
 
-# 遠隔監視 RViz
+# 遠隔監視 RViz。初回やイメージ削除後は必要なイメージだけ自動でビルドする。
 #   make rviz VEHICLE=A3
 # 車両トピックは /<VEHICLE_ID>/... の prefix 付きで届く。VEHICLE を渡すと prefix を
 # 剥がす中継が立ち、その車両が RViz に映る。未指定だと地図しか出ない。
-rviz:
+rviz: rviz-image
 	docker compose stop rviz2
 	RVIZ_VEHICLE_ID="$(VEHICLE)" docker compose up -d rviz2
+
+rviz-image:
+	@if ! docker image inspect aichallenge-remote-rviz:latest >/dev/null 2>&1; then \
+		echo 'RViz image not found; building aichallenge-remote-rviz:latest ...'; \
+		./docker_build.sh rviz; \
+	fi
 
 rviz-stop:
 	docker compose stop rviz2
@@ -108,6 +117,12 @@ ps:
 		pgrep -g "$$pid" -a | sed 's/^/  /'; \
 	else \
 		echo "remote: down"; \
+	fi
+	@lpid=$$(cat output/gui-launcher.pid 2>/dev/null); \
+	if [ -n "$$lpid" ] && kill -0 "$$lpid" 2>/dev/null; then \
+		echo "launcher: up (PID $$lpid)"; \
+	else \
+		echo "launcher: down"; \
 	fi
 	@echo
 	@docker compose ps

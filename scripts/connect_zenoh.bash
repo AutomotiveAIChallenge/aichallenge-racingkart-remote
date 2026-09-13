@@ -13,6 +13,15 @@
 
 set -eo pipefail
 
+if [ ! -f /opt/ros/humble/setup.bash ]; then
+    echo "Error: ROS 2 Humble が見つかりません (/opt/ros/humble)。" >&2
+    exit 1
+fi
+
+# 端末から直接起動した場合も ROS_DISTRO などを設定する。
+# shellcheck disable=SC1091
+source /opt/ros/humble/setup.bash
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TEMPLATE="${SCRIPT_DIR}/../shared/zenoh-user.json5.template"
 TLS_ROOT="${TLS_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
@@ -57,6 +66,22 @@ esac
 if ! PORT="$(zenoh_port_for_vehicle_id "${VEHICLE_ID}")"; then
     echo "エラー: 無効な Vehicle ID です: '${VEHICLE_ID}'" >&2
     echo "${VEHICLE_ID_VALID_LIST}, test-* のいずれかを指定してください。" >&2
+    exit 1
+fi
+
+required_tls_files=(
+    "${TLS_ROOT}/tls/client/cert.pem"
+    "${TLS_ROOT}/tls/client/key.pem"
+    "${TLS_ROOT}/tls/server/minica.pem"
+)
+missing_tls_files=()
+for tls_file in "${required_tls_files[@]}"; do
+    [ -f "${tls_file}" ] || missing_tls_files+=("${tls_file}")
+done
+if [ "${#missing_tls_files[@]}" -gt 0 ]; then
+    echo "Error: Zenoh接続用のmTLS素材がありません:" >&2
+    printf '  %s\n' "${missing_tls_files[@]}" >&2
+    echo "別途配布されたzipを tls/ に展開するか、TLS_ROOTを設定してください。" >&2
     exit 1
 fi
 
