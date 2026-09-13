@@ -8,6 +8,8 @@ import subprocess
 import sys
 from unittest import mock
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import gui_tools as launcher
@@ -140,6 +142,52 @@ def test_command_touches_remote_component_for_zenoh_joy_manager():
 
 
 # --- RC13: 孤児 joy_node の掃除 ---
+
+
+@pytest.mark.parametrize(
+    ("executable", "matches"),
+    [
+        ("/opt/ros/humble/lib/joy/joy_node", True),
+        ("/tmp/overlay/install/joy/lib/joy/joy_node", True),
+        ("/opt/ros/humble/lib/joy/joy_node_other", False),
+        ("/opt/ros/humble/lib/other/joy_node", False),
+        ("ros2 run joy joy_node", False),
+    ],
+)
+def test_orphan_pattern_matches_only_the_joy_executable(executable, matches):
+    # ROS を起動せず、孤児と同じ argv[0] を持つ子を作る。pgrep は pkill と同じ
+    # 正規表現を使い、-P でこのテストの子だけに限定する。
+    proc = subprocess.Popen([executable, "30"], executable="/bin/sleep")
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "-P", str(os.getpid()), launcher.ORPHAN_KILL_PATTERNS["joy"]],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+        assert (str(proc.pid) in result.stdout.splitlines()) is matches
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3.0)
+
+
+@pytest.mark.parametrize("phase", ["idle", "running", "pending", "stopping"])
+def test_stop_joy_is_available_for_orphans_except_while_busy(phase):
+    app = object.__new__(launcher.RemoteGui)
+    app.buttons = {
+        label: mock.Mock() for label in ("Stop Joy", "Stop Zenoh", "Stop Manager")
+    }
+    app._button_state_cache = {}
+    app._process_phase = lambda key: phase
+    app._refresh_status_indicators = mock.Mock()
+
+    app._refresh_button_states()
+
+    joy_state = launcher.tk.NORMAL if phase in ("idle", "running") else launcher.tk.DISABLED
+    tracked_state = launcher.tk.NORMAL if phase == "running" else launcher.tk.DISABLED
+    app.buttons["Stop Joy"].configure.assert_called_once_with(state=joy_state)
+    for label in ("Stop Zenoh", "Stop Manager"):
+        app.buttons[label].configure.assert_called_once_with(state=tracked_state)
 
 
 def test_unregistered_log_key_does_not_call_pkill():

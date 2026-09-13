@@ -487,7 +487,7 @@ COMMANDS: List[CommandSpec] = [
         role="stop",
         log_key="joy",
         kind="stop",
-        note="GUI で起動した joy プロセスを終了します (Ctrl+C 相当)。",
+        note="joy プロセスを停止します。GUI が追跡していない孤児ノードも対象です。",
     ),
     CommandSpec(
         label="Restart Joy",
@@ -538,7 +538,9 @@ SPEC_MAP: Dict[str, CommandSpec] = {spec.label: spec for spec in COMMANDS}
 # Restart Joy が孤児に加えてもう1つ joy_node を起こしてしまう (RC13)。
 # 巻き込み事故を避けるため、パターンをここで明示登録した log_key だけ pkill で掃除する。
 ORPHAN_KILL_PATTERNS: Dict[str, str] = {
-    "joy": "ros2 run joy joy_node",
+    # ros2 run はラッパーで、孤児になるのは別プロセスの実行ファイル。
+    # argv[0] と実行ファイル名の境界を限定し、引数や似た名前には一致させない。
+    "joy": r"^/[^[:space:]]*/lib/joy/joy_node([[:space:]]|$)",
 }
 
 
@@ -1124,7 +1126,8 @@ class RemoteGui:
 
         pending (起動待ち) と stopping (SIGKILL 昇格待ち) の間は、そのグループを
         一律無効にして誤操作とプロセスグループの重複を防ぐ。running 中は Start だけ
-        無効、GUI 管理のプロセスを畳む "Stop X" (kind="stop") は未実行なら無効。
+        無効、孤児の掃除に対応する Stop は idle でも有効。それ以外の
+        "Stop X" (kind="stop") は未実行なら無効。
         値が変わらない限り configure しない (Tcl 往復を避けるため churn 防止)。
         """
         # フェーズは log_key ごとに1回だけ調べる (poll() はシステムコールなので、
@@ -1136,8 +1139,9 @@ class RemoteGui:
             if phase in ("pending", "stopping"):
                 desired = tk.DISABLED
             elif spec.kind == "stop":
-                # GUI が起動したプロセスを畳むボタン。止める相手がいなければ無効。
-                desired = tk.NORMAL if phase == "running" else tk.DISABLED
+                # 孤児の掃除に対応する Stop は、追跡中の相手がいなくても使える。
+                can_stop = phase == "running" or spec.log_key in ORPHAN_KILL_PATTERNS
+                desired = tk.NORMAL if can_stop else tk.DISABLED
             elif spec.role in ("stop", "restart"):
                 # stop/restart は GUI が追跡していないプロセス (孤児など) も畳めるので、
                 # 実行中かどうかによらず常に有効。

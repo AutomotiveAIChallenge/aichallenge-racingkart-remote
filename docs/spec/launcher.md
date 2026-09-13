@@ -12,7 +12,7 @@
 | 対象 | Start | Stop | Restart | ログペイン |
 | --- | --- | --- | --- | --- |
 | Zenoh | `remote_component.bash zenoh` | GUIが起動したプロセスを停止 | 再接続 | Zenoh Log |
-| Joy | `remote_component.bash joy` | GUIが起動したプロセスを停止 | 再起動 | Joy Log |
+| Joy | `remote_component.bash joy` | GUIが起動したプロセスと孤児ノードを停止 | 再起動 | Joy Log |
 | Manager | `remote_component.bash manager` | GUIが起動したプロセスを停止 | 再起動 | Manager Log |
 
 Zenoh / Manager の対象車両は `A2 A3 A6 A7` のチェックボックスで複数選択し、既定では
@@ -40,6 +40,10 @@ Zenoh / Manager の対象車両は `A2 A3 A6 A7` のチェックボックスで�
 - ログキューは10,000件に制限し、満杯時は生成側をブロックしない。
 - Tk側は1回400件・10msまでをまとめて描画し、イベントループを飢餓状態にしない。
 - SIGINT / SIGTERM ハンドラはTk APIを呼ばず、フラグだけを立てる。
+
+Joy の Stop / Restart は、GUI がプロセスを追跡していない場合にも、残った
+`lib/joy/joy_node` 実行ファイルを停止する。Stop Joy は未追跡の状態でも有効とし、
+起動待ち・停止処理中は無効にする。
 
 ## 運用上の注意
 
