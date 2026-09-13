@@ -209,6 +209,29 @@ def test_joy_is_registered_and_uses_pkill_dash_f():
     assert kwargs.get("timeout") == 3.0
 
 
+def test_wait_for_orphan_gone_returns_true_once_pgrep_finds_nothing():
+    # pkill はシグナルを送るだけ。消える前に新プロセスを起こすと publisher が二重になる。
+    results = [mock.Mock(returncode=0), mock.Mock(returncode=1)]
+    with mock.patch("gui_tools.subprocess.run", side_effect=results) as run:
+        with mock.patch("gui_tools.time.sleep"):
+            assert launcher.wait_for_orphan_gone("joy", timeout=1.0, interval=0.0) is True
+    assert run.call_count == 2
+    assert run.call_args[0][0] == ["pgrep", "-f", launcher.ORPHAN_KILL_PATTERNS["joy"]]
+
+
+def test_wait_for_orphan_gone_returns_false_when_the_orphan_survives():
+    # 居座り続けるなら timeout で諦めて False。GUI 側はそれをログに出す。
+    with mock.patch("gui_tools.subprocess.run", return_value=mock.Mock(returncode=0)):
+        with mock.patch("gui_tools.time.sleep"):
+            assert launcher.wait_for_orphan_gone("joy", timeout=0.0, interval=0.0) is False
+
+
+def test_wait_for_orphan_gone_is_a_noop_for_unregistered_log_key():
+    with mock.patch("gui_tools.subprocess.run") as run:
+        assert launcher.wait_for_orphan_gone("manager") is True
+    run.assert_not_called()
+
+
 def test_no_match_returns_false():
     # pkill は該当プロセスが無いと非0を返す。誤って「掃除した」とログしないための境界。
     completed = mock.Mock(returncode=1)

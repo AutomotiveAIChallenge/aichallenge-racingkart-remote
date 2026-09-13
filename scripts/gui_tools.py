@@ -543,6 +543,11 @@ ORPHAN_KILL_PATTERNS: Dict[str, str] = {
     "joy": r"^/[^[:space:]]*/lib/joy/joy_node([[:space:]]|$)",
 }
 
+# 孤児の消滅を待つ上限。pkill はシグナルを送るだけで終了を待たないので、消えるのを
+# 見届けてから新プロセスを起こす (Restart は RC12 と同じ約束を守る)。
+ORPHAN_REAP_TIMEOUT_S = 3.0
+ORPHAN_REAP_INTERVAL_S = 0.1
+
 
 def kill_orphan_pattern(log_key: str, timeout: float = 3.0) -> bool:
     """log_key に登録された pattern で pkill する。登録が無ければ何もしない。
@@ -560,6 +565,34 @@ def kill_orphan_pattern(log_key: str, timeout: float = 3.0) -> bool:
         timeout=timeout,
     )
     return result.returncode == 0
+
+
+def wait_for_orphan_gone(
+    log_key: str,
+    timeout: float = ORPHAN_REAP_TIMEOUT_S,
+    interval: float = ORPHAN_REAP_INTERVAL_S,
+) -> bool:
+    """pkill した孤児が実際に消えるまで待つ。消えたら True、粘ったら False。
+
+    pkill は SIGTERM を送って即座に戻る。待たずに新プロセスを起こすと、一瞬とはいえ
+    joy の publisher が2つ並ぶ。バックグラウンドスレッドから呼ぶ前提 (GUI は止めない)。
+    """
+    pattern = ORPHAN_KILL_PATTERNS.get(log_key)
+    if pattern is None:
+        return True
+    deadline = time.monotonic() + timeout
+    while True:
+        result = subprocess.run(
+            ["pgrep", "-f", pattern],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
 
 
 COLUMN_LAYOUT = [
@@ -1060,9 +1093,14 @@ class RemoteGui:
 
         def worker() -> None:
             killed = False
+            gone = True
             error: Optional[Exception] = None
             try:
                 killed = kill_orphan_pattern(log_key)
+                if killed:
+                    # pkill はシグナルを送るだけ。消えるのを見届けてから on_terminated
+                    # (Restart なら新プロセスの起動) を呼ぶ。
+                    gone = wait_for_orphan_gone(log_key)
             except Exception as exc:  # pragma: no cover - defensive
                 error = exc
 
@@ -1071,10 +1109,17 @@ class RemoteGui:
                     self._append_log(log_key, f"[orphan cleanup failed: {error}]\n")
                 elif killed:
                     pattern = ORPHAN_KILL_PATTERNS[log_key]
-                    self._append_log(
-                        log_key,
-                        f"[orphan cleanup: killed stray process matching {pattern!r}]\n",
-                    )
+                    if gone:
+                        self._append_log(
+                            log_key,
+                            f"[orphan cleanup: killed stray process matching {pattern!r}]\n",
+                        )
+                    else:
+                        self._append_log(
+                            log_key,
+                            f"[orphan cleanup: stray process matching {pattern!r} "
+                            "did not exit]\n",
+                        )
                 else:
                     self._append_log(log_key, "[no running process]\n")
                 if on_terminated is not None:
