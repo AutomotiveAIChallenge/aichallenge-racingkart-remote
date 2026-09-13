@@ -11,14 +11,14 @@
   Autoware / driver / DDS                        joy → manager → zenoh   ホスト
         │                                                    │
    zenoh-bridge-ros2dds ──── TLS ── 中継サーバ ──── zenoh-bridge-ros2dds  ホスト
-                                                             │
-                                                       RViz (遠隔監視)    コンテナ
 ```
+
+このリポジトリは joy の送出（送信側）だけを担う。車両からのテレメトリを受信・可視化する
+役目は持たない。
 
 ## セットアップ
 
-**RViz 以外はすべてホストで動きます。** コンテナに残しているのは RViz だけで、Autoware の
-RViz プラグインと `map_loader` が要るためです。
+**すべてホストで動きます。** コンテナは使いません。
 
 ### ホストに入れるもの
 
@@ -35,7 +35,6 @@ manager が使うのは `rclpy` + `sensor_msgs` だけです。Autoware も `rac
 
 ```bash
 cp .env.example .env    # 必要なら編集
-./docker_build.sh rviz  # 遠隔監視イメージ（省略可。初回の make rviz でも自動ビルド）
 ```
 
 mTLS 素材（zip で別配布）を展開して `tls/` に置いてください。リポジトリには含まれません。
@@ -43,9 +42,6 @@ mTLS 素材（zip で別配布）を展開して `tls/` に置いてください
 レース通知を使うなら、`.env` に MQTT の認証情報を書いてください（`MQTT_USERNAME` /
 `MQTT_PASSWORD`）。**認証情報はリポジトリに置きません。** `MQTT_HOST` を空にすると通知を
 送らず、manager はそのまま起動します。
-
-RViz コンテナは `network_mode: host` で、ホスト側のノードと同じ `ROS_DOMAIN_ID=0`、
-CycloneDDS 設定で噛み合います。
 
 ## 使い方
 
@@ -97,7 +93,7 @@ manager の仕様は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md)（jo
   開始は Y（自動運転）を、終了は X（ステアのみ自動 + スロットルカット）を送ります。
   レース開始を押すと選択も「全台」に切り替わります。
   **レース終了はブレーキを掛けません。止めるのは緊急停止です。**
-- manager は車両テレメトリを見ません。車両の状態は RViz で確認してください。
+- manager は車両テレメトリを見ません。車両の状態は車両側のログや別途の監視手段で確認してください。
 - GUI の「レース開始」「レース終了」を押したときだけ、MQTT でも通知します
   （`kart_race_start` / `kart_race_finish`）。joy の Y や緊急停止ボタンでは通知しません。
   通知が失敗しても操作は止まりません。
@@ -127,15 +123,7 @@ make remote VEHICLES="A3" BRAKE_TEST=20
 
 仕様と注意点は [`docs/spec/joy-routing.md`](docs/spec/joy-routing.md) の §11 にあります。
 
-### 遠隔監視
-
-```bash
-make rviz VEHICLE=A3   # A3 の位置・軌跡・速度を表示
-make rviz              # 地図だけ表示
-make rviz-stop
-```
-
-### ランチャGUI（Zenoh / RViz / Joy / Manager を個別に操作する）
+### ランチャGUI（Zenoh / Joy / Manager を個別に操作する）
 
 ```bash
 ./scripts/gui_tools.py
@@ -143,12 +131,8 @@ make rviz-stop
 
 本体リポジトリの `remote/gui_tools.py` と同じGUIに Manager の列とログを加えたものです。
 上部のチェックボックスで Zenoh / Manager の対象車両を複数選択できます（既定は
-`A2 A3 A6 A7`）。RViz は同時に1台を表示するため、隣の `RViz Vehicle` で表示車両を
-個別に選びます。Manager と Joy は共通起動前段を通すため、`.env`、ROS 2、
+`A2 A3 A6 A7`）。Manager と Joy は共通起動前段を通すため、`.env`、ROS 2、
 CycloneDDS設定も読み込まれます。
-
-RVizイメージが無い環境では、最初のRViz起動時だけ `aichallenge-remote-rviz:latest` を
-自動ビルドします。ビルド中の進捗はRVizログに表示されます。
 
 プロセスは専用グループで起動され、停止は SIGTERM から SIGKILL へ段階的に進みます。
 Restart は停止完了を待ってから起動します。ログが大量に流れてもGUIを固めないよう、
@@ -166,14 +150,11 @@ GUIが動いている間の `make remote` の3方向）。詳しい仕様は
 
 ```bash
 ./scripts/connect_zenoh.bash A3     # 1台に zenoh 接続（再接続なし）
-./scripts/rviz.bash A3              # RViz だけ起動（A3を表示）
-./scripts/rviz.bash                 # RViz だけ起動（地図のみ）
-./scripts/restart.bash A3           # RViz を上げ直して A3 に繋ぎ直す
+./scripts/restart.bash A3           # 1台だけ zenoh に繋ぎ直す
 ```
 
 `make remote` が複数台をまとめて扱う（`run_zenoh.bash`、再接続あり）のに対し、
-`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。RVizで車両を映す場合は
-`rviz.bash A3` または `make rviz VEHICLE=A3` のように1台を指定します。
+`connect_zenoh.bash` は1台に繋ぐだけで再接続しません。
 
 ## ディレクトリ構成
 
@@ -183,7 +164,6 @@ GUIが動いている間の `make remote` の3方向）。詳しい仕様は
 | `docs/` | 仕様。`docs/spec/` が manager とランチャの正本です |
 | `scripts/` | 起動・接続スクリプトとランチャGUI。`remote_component.bash` が構成要素1つ分の起動を、`run_remote.bash` が一式の起動を担います |
 | `shared/` | **本体リポジトリからの複製。同期が必要**（下記） |
-| `rviz/` | 遠隔監視 RViz 用のアセット（地図、車体モデル、rviz 設定、launch、プラグイン） |
 | `vendor/` | zenoh-bridge-ros2dds の deb |
 
 ## shared/ の同期について
@@ -199,41 +179,11 @@ GUIが動いている間の `make remote` の3方向）。詳しい仕様は
 車両を追加するとき、zenoh の許可リストを変えるときは、必ず両方のリポジトリを揃えてください。
 CI で突き合わせる仕組みを入れる予定です（未実装）。
 
-### 本体との既知の差分
-
-`shared/zenoh-user.json5.template` の `allow.subscribers` に
-`/__VEHICLE_ID__/v2x/vehicle_positions/markers` を足しています。本体側にはまだ入って
-いません（[PR #285](https://github.com/AutomotiveAIChallenge/aichallenge-racingkart/pull/285)
-は車両側 `vehicle/zenoh.json5` の publish 許可だけを追加していて、遠隔側の subscribe
-許可が漏れています）。この1行が無いと、車両が V2X マーカーを送っても遠隔側のブリッジが
-中継せず、RViz に他車が映りません。
-
-突き合わせ CI を作るときは、この行を既知の差分として扱ってください。本体側が修正されたら
-差分は解消されます。
-
-`rviz/map/` と `rviz/description/` も本体からの複製ですが、コース形状と車体形状なので
-更新頻度は低いものです。
-
-## イメージ構成
-
-| イメージ | ベース | サイズ | 用途 |
-|---|---|---|---|
-| `aichallenge-remote-rviz` | Autoware universe | 約 14GB | 遠隔監視 RViz |
-
-イメージは1つだけです。遠隔操作側（joy / manager / GUI / zenoh）は Autoware を必要とせず、
-ホストの ROS 2 Humble で足りるのでコンテナに入れていません。RViz 側は Autoware の RViz
-プラグインと `map_loader` を使うので Autoware ベースのままです。
-
-車体モデルと地図は `COPY` するだけで colcon build を必要としません
-（`ament_auto_package(INSTALL_TO_SHARE)` と同じことを Dockerfile で行っています）。
-速度計オーバーレイ（`autoware_overlay_rviz_plugin`）だけは C++ プラグインなので
-イメージビルド時に約26秒かけてビルドします。
+このリポジトリの `shared/zenoh-user.json5.template` は `allow.subscribers` を持ちません。
+このリポジトリ（remote）は joy の送出だけを担い、車両からのテレメトリを受信・可視化する
+役目は持たないためです。本体側 `vehicle/zenoh.json5` の許可リストと揃えるのは
+`allow.publishers` の車両ID・トピック名だけです。
 
 ## 未完了
 
 - [ ] `shared/` を本体と突き合わせる CI
-- [ ] RViz の速度計オーバーレイ（`rviz/plugin/`）が `rviz/config/remote.rviz` から使われていません。
-      Dockerfile は約26秒かけてビルドしています。`SignalDisplay` を足して使うか、プラグインごと消すか。
-- [ ] `/sensing/gnss/pose_with_covariance` は `remote.rviz` に表示設定があり `run_rviz.bash` が中継
-      していますが、zenoh の許可リストに無いため届きません。両リポジトリの許可リストに足して通すか、
-      表示と中継を消すか。

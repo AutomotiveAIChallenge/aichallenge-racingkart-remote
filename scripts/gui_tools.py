@@ -29,9 +29,8 @@ LAUNCHER_PID_FILE = REPO_ROOT / "output" / "gui-launcher.pid"
 # 拒否する (LN-15)。
 REMOTE_PID_FILE = REPO_ROOT / "output" / "remote.pid"
 
-# 遠隔操作の対象にする実車。Zenoh と Manager は複数台、RViz はこの中の1台を取る。
+# 遠隔操作の対象にする実車。Zenoh と Manager は複数台をまとめて扱う。
 VEHICLE_IDS = ["A2", "A3", "A6", "A7"]
-DEFAULT_RVIZ_VEHICLE_ID = "A2"
 
 
 # --- 多重起動防止まわりの純粋関数 (Tk に依存しないので pytest から直接叩ける) ---
@@ -111,7 +110,7 @@ def remote_stack_pid(path: Path) -> Optional[int]:
 
 def command_touches_remote_component(command_text: str) -> bool:
     """レンダリング後のコマンドが `remote_component.bash` (zenoh/joy/manager) を
-    起動するかどうか。RViz はコンテナで `make remote` と競合しないので対象外 (LN-15)。
+    起動するかどうか (LN-15)。
     """
     return "remote_component.bash" in command_text
 
@@ -121,7 +120,7 @@ WINDOW_GEOMETRY = "1100x680"
 WINDOW_MIN_SIZE = (900, 540)
 
 # --- ログ処理まわりの定数 ---
-# chatty な子プロセス (zenoh-bridge, rviz, joy, manager など) がログを高速に吐いても
+# chatty な子プロセス (zenoh-bridge, joy, manager など) がログを高速に吐いても
 # Tk のメインループを飢餓状態にしないための上限・予算値。
 MAX_LOG_LINES = 2000  # 各ログウィジェットが保持する最大行数
 LOG_QUEUE_MAXSIZE = 10000  # ログキューの上限。超えたら行を捨てる (producer は絶対にブロックしない)
@@ -372,32 +371,8 @@ def apply_devias_theme(root: tk.Tk) -> tuple[ttk.Style, tkfont.Font]:
         relief="solid",
         borderwidth=1,
     )
-    style.configure(
-        "DeviasOutlineTall.TButton",
-        background=PALETTE["surface"],
-        foreground=PALETTE["primary_light"],
-        bordercolor=PALETTE["primary"],
-        focusthickness=0,
-        padding=(8, 4),
-        relief="solid",
-        borderwidth=1,
-    )
     style.map(
         "DeviasOutline.TButton",
-        background=[
-            ("active", PALETTE["primary_soft"]),
-            ("pressed", PALETTE["primary_soft"]),
-        ],
-        bordercolor=[
-            ("active", PALETTE["primary"]),
-            ("pressed", PALETTE["primary"]),
-        ],
-        foreground=[
-            ("disabled", PALETTE["text_muted"]),
-        ],
-    )
-    style.map(
-        "DeviasOutlineTall.TButton",
         background=[
             ("active", PALETTE["primary_soft"]),
             ("pressed", PALETTE["primary_soft"]),
@@ -455,23 +430,18 @@ class CommandSpec:
     command: str | None = None
     log_key: str | None = None
     requires_vehicles: bool = False
-    requires_rviz_vehicle: bool = False
     stop_before: bool = False
     note: str | None = None
     kind: str = "command"  # command, stop, stop_all
     # UI 上の役割。ボタンの色と有効/無効の判定はこれだけを見る。表示ラベルの文字列を
-    # 条件に使うと、文言を変えただけで挙動が壊れる。kind とは独立している点に注意:
-    # "Stop RViz" は `./rviz.bash down` を実行する kind="command" だが role="stop"。
+    # 条件に使うと、文言を変えただけで挙動が壊れる。kind とは独立している点に注意。
     role: str = "start"  # start, stop, restart
 
-    def render(self, vehicle_ids: List[str], rviz_vehicle_id: str) -> str:
+    def render(self, vehicle_ids: List[str]) -> str:
         if self.kind != "command":
             return ""
         assert self.command is not None
-        return self.command.format(
-            vehicle_ids=" ".join(vehicle_ids),
-            rviz_vehicle_id=rviz_vehicle_id,
-        )
+        return self.command.format(vehicle_ids=" ".join(vehicle_ids))
 
 COMMANDS: List[CommandSpec] = [
     CommandSpec(
@@ -504,43 +474,6 @@ COMMANDS: List[CommandSpec] = [
         note="既存プロセス停止後、選択した全車両へ再接続します。",
     ),
     CommandSpec(
-        label="Restart Zenoh and RViz",
-        role="restart",
-        command=(
-            "./rviz.bash restart {rviz_vehicle_id} && "
-            "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash zenoh "
-            '../output/gui-launcher "{vehicle_ids}"'
-        ),
-        log_key="zenoh",
-        requires_vehicles=True,
-        requires_rviz_vehicle=True,
-        stop_before=True,
-        note="RViz と、選択した全車両の Zenoh bridge を再起動します。",
-    ),
-    CommandSpec(
-        label="Start RViz",
-        command="./rviz.bash {rviz_vehicle_id}",
-        log_key="rviz",
-        requires_rviz_vehicle=True,
-        note="RViz 用コンテナを指定車両の表示設定で起動します。",
-    ),
-    CommandSpec(
-        label="Stop RViz",
-        role="stop",
-        command="./rviz.bash down",
-        log_key="rviz",
-        stop_before=True,
-        note="RViz コンテナを停止します。",
-    ),
-    CommandSpec(
-        label="Restart RViz",
-        role="restart",
-        command="./rviz.bash restart {rviz_vehicle_id}",
-        log_key="rviz",
-        requires_rviz_vehicle=True,
-        note="RViz コンテナを指定車両の表示設定で再起動します。",
-    ),
-    CommandSpec(
         label="Start Joy",
         command=(
             "REMOTE_COMPONENT_STDIO=1 ./remote_component.bash joy "
@@ -554,7 +487,7 @@ COMMANDS: List[CommandSpec] = [
         role="stop",
         log_key="joy",
         kind="stop",
-        note="GUI で起動した joy プロセスを終了します (Ctrl+C 相当)。",
+        note="joy プロセスを停止します。GUI が追跡していない孤児ノードも対象です。",
     ),
     CommandSpec(
         label="Restart Joy",
@@ -600,12 +533,39 @@ COMMANDS: List[CommandSpec] = [
 
 SPEC_MAP: Dict[str, CommandSpec] = {spec.label: spec for spec in COMMANDS}
 
+# self.processes は GUI 自身が起動したプロセスしか把握できない。前回セッションの
+# クラッシュや手動起動で残った同種プロセスは Stop/Restart を押しても消せず、
+# Restart Joy が孤児に加えてもう1つ joy_node を起こしてしまう (RC13)。
+# 巻き込み事故を避けるため、パターンをここで明示登録した log_key だけ pkill で掃除する。
+ORPHAN_KILL_PATTERNS: Dict[str, str] = {
+    # ros2 run はラッパーで、孤児になるのは別プロセスの実行ファイル。
+    # argv[0] と実行ファイル名の境界を限定し、引数や似た名前には一致させない。
+    "joy": r"^/[^[:space:]]*/lib/joy/joy_node([[:space:]]|$)",
+}
+
+
+def kill_orphan_pattern(log_key: str, timeout: float = 3.0) -> bool:
+    """log_key に登録された pattern で pkill する。登録が無ければ何もしない。
+
+    戻り値は「一致するプロセスを見つけて killed した (pkill の終了コード 0)」かどうか。
+    Tk に依存しないのでテストしやすいよう、GUI クラスから切り出してある。
+    """
+    pattern = ORPHAN_KILL_PATTERNS.get(log_key)
+    if pattern is None:
+        return False
+    result = subprocess.run(
+        ["pkill", "-f", pattern],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return result.returncode == 0
+
+
 COLUMN_LAYOUT = [
     ("Zenoh", ["Start Zenoh", "Stop Zenoh", "Restart Zenoh"]),
-    ("RViz", ["Start RViz", "Stop RViz", "Restart RViz"]),
     ("Joy", ["Start Joy", "Stop Joy", "Restart Joy"]),
     ("Manager", ["Start Manager", "Stop Manager", "Restart Manager"]),
-    ("Zenoh and RViz", ["Restart Zenoh and RViz"]),
 ]
 
 # フェーズごとのステータス表示 (テキスト, スタイル名)。
@@ -625,7 +585,6 @@ BUTTON_STYLE_BY_ROLE = {
 
 LOG_AREAS = {
     "zenoh": "Zenoh Log",
-    "rviz": "RViz Log",
     "joy": "Joy Log",
     "manager": "Manager Log",
 }
@@ -661,8 +620,6 @@ class RemoteGui:
         self.vehicle_vars = {
             vehicle_id: tk.BooleanVar(value=True) for vehicle_id in VEHICLE_IDS
         }
-        self.rviz_vehicle_id_var = tk.StringVar(value=DEFAULT_RVIZ_VEHICLE_ID)
-
         self.processes: Dict[str, _ProcessEntry] = {}
         # self.processes への「世代を見てから消す」操作はリーダースレッドとメイン
         # スレッドの双方から走る。get と pop の間に別スレッドが新しいプロセスを
@@ -718,18 +675,6 @@ class RemoteGui:
                 style="Devias.TCheckbutton",
             ).pack(side=tk.LEFT, padx=(6, 0))
 
-        ttk.Label(top_frame, text="RViz Vehicle:", style="TLabel").pack(
-            side=tk.LEFT, padx=(20, 0)
-        )
-        rviz_vehicle_entry = ttk.Combobox(
-            top_frame,
-            textvariable=self.rviz_vehicle_id_var,
-            values=VEHICLE_IDS,
-            width=6,
-            state="readonly",
-        )
-        rviz_vehicle_entry.pack(side=tk.LEFT, padx=(6, 16))
-
         self.stop_all_button = ttk.Button(
             top_frame,
             text="Stop All",
@@ -760,34 +705,19 @@ class RemoteGui:
 
             ttk.Label(col_frame, text=label, style="Header.TLabel").pack(pady=(0, 4))
 
-            if label == "Zenoh and RViz":
-                for btn_label in buttons:
-                    spec = SPEC_MAP[btn_label]
-                    btn_style = "DeviasOutlineTall.TButton"
+            for btn_label in buttons:
+                spec = SPEC_MAP[btn_label]
+                btn_style = BUTTON_STYLE_BY_ROLE[spec.role]
 
-                    button = ttk.Button(
-                        col_frame,
-                        text=spec.label,
-                        command=lambda s=spec: self._handle_command(s),
-                        width=20,
-                        style=btn_style,
-                    )
-                    button.pack(pady=2, fill=tk.BOTH, expand=True)
-                    self.buttons[spec.label] = button
-            else:
-                for btn_label in buttons:
-                    spec = SPEC_MAP[btn_label]
-                    btn_style = BUTTON_STYLE_BY_ROLE[spec.role]
-
-                    button = ttk.Button(
-                        col_frame,
-                        text=spec.label,
-                        command=lambda s=spec: self._handle_command(s),
-                        width=18,
-                        style=btn_style,
-                    )
-                    button.pack(pady=2, fill=tk.X)
-                    self.buttons[spec.label] = button
+                button = ttk.Button(
+                    col_frame,
+                    text=spec.label,
+                    command=lambda s=spec: self._handle_command(s),
+                    width=18,
+                    style=btn_style,
+                )
+                button.pack(pady=2, fill=tk.X)
+                self.buttons[spec.label] = button
 
         for i in range(len(COLUMN_LAYOUT)):
             button_container.columnconfigure(i, weight=1)
@@ -867,9 +797,10 @@ class RemoteGui:
         logs_frame.rowconfigure(0, weight=1)
 
     def _handle_stop_single(self, log_key: str) -> None:
-        if not self._process_running(log_key):
-            self._append_log(log_key, '[no running process]\n')
-            return
+        # _process_running() で先に弾くと、GUI が追跡していない孤児 (RC13) は
+        # 「動いていない」ことになって _stop_process 自体に届かず、Restart だけ
+        # 掃除できて Stop では掃除できないという食い違いになる。追跡の有無に
+        # 関わらず _stop_process に任せ、孤児の掃除も同じ経路を通す。
         self._append_log(log_key, '[stop requested]\n')
         self._stop_process(log_key)
 
@@ -879,7 +810,6 @@ class RemoteGui:
             for vehicle_id in VEHICLE_IDS
             if self.vehicle_vars[vehicle_id].get()
         ]
-        rviz_vehicle_id = self.rviz_vehicle_id_var.get().strip()
 
         # 停止は log_key で追跡中のプロセスを畳むだけで車両設定を使わない。
         # 車両検証より先に処理し、設定にかかわらず必ず停止できるようにする。
@@ -894,15 +824,12 @@ class RemoteGui:
         if spec.requires_vehicles and not vehicle_ids:
             messagebox.showwarning("入力不足", "対象車両を1台以上選択してください。")
             return
-        if spec.requires_rviz_vehicle and rviz_vehicle_id not in VEHICLE_IDS:
-            messagebox.showwarning("入力不足", "RViz Vehicleを選択してください。")
-            return
 
-        command_text = spec.render(vehicle_ids, rviz_vehicle_id)
+        command_text = spec.render(vehicle_ids)
 
         # make remote (run_remote.bash) が生きている間は zenoh/joy/manager を起動・
         # 再起動させない (LN-15)。二重起動すると joy publisher が重複し、車両側は
-        # どちらが本物か区別できない。RViz はコンテナなのでここには来ない。
+        # どちらが本物か区別できない。
         if command_touches_remote_component(command_text):
             conflict_pid = remote_stack_pid(REMOTE_PID_FILE)
             if conflict_pid is not None:
@@ -1060,9 +987,10 @@ class RemoteGui:
         with self._processes_lock:
             entry = self.processes.pop(log_key, None)
         if entry is None:
+            # 追跡が無くても実機には孤児が残っているかもしれない (RC13)。「Stop」も
+            # ここを通すので、追跡していないというだけで掃除をスキップしない。
             self._refresh_button_states()
-            if on_terminated is not None:
-                on_terminated()
+            self._reap_orphan_async(log_key, on_terminated)
             return
         process = entry.process
         if process.poll() is None:
@@ -1119,6 +1047,47 @@ class RemoteGui:
             # ウィンドウが既に破棄されている場合は諦める (_on_close / _terminate_all 側で後始末される)
             pass
 
+    def _reap_orphan_async(
+        self, log_key: str, on_terminated: Optional[Callable[[], None]] = None
+    ) -> None:
+        """GUI が追跡していない同種プロセスを別スレッドで掃除する (RC13)。
+
+        対象は ORPHAN_KILL_PATTERNS に明示登録された log_key だけに限定し、
+        無関係なプロセスを巻き込まない。pkill は環境によっては数百ms以上かかりうるので、
+        _stop_process の「非ブロッキング」という前提を保つため Tk のメインスレッドでは
+        呼ばず、結果は root.after 経由でメインスレッドへ戻す。
+        """
+
+        def worker() -> None:
+            killed = False
+            error: Optional[Exception] = None
+            try:
+                killed = kill_orphan_pattern(log_key)
+            except Exception as exc:  # pragma: no cover - defensive
+                error = exc
+
+            def finish() -> None:
+                if error is not None:
+                    self._append_log(log_key, f"[orphan cleanup failed: {error}]\n")
+                elif killed:
+                    pattern = ORPHAN_KILL_PATTERNS[log_key]
+                    self._append_log(
+                        log_key,
+                        f"[orphan cleanup: killed stray process matching {pattern!r}]\n",
+                    )
+                else:
+                    self._append_log(log_key, "[no running process]\n")
+                if on_terminated is not None:
+                    on_terminated()
+
+            try:
+                self.root.after(0, finish)
+            except tk.TclError:
+                # ウィンドウが既に破棄されている場合は諦める (_on_close / _terminate_all 側で後始末される)
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
     @staticmethod
     def _signal_process_group(process: subprocess.Popen[str], sig: int) -> None:
         """子孫ごと畳む。start_new_session=True で作ったグループに送る。"""
@@ -1157,7 +1126,8 @@ class RemoteGui:
 
         pending (起動待ち) と stopping (SIGKILL 昇格待ち) の間は、そのグループを
         一律無効にして誤操作とプロセスグループの重複を防ぐ。running 中は Start だけ
-        無効、GUI 管理のプロセスを畳む "Stop X" (kind="stop") は未実行なら無効。
+        無効、孤児の掃除に対応する Stop は idle でも有効。それ以外の
+        "Stop X" (kind="stop") は未実行なら無効。
         値が変わらない限り configure しない (Tcl 往復を避けるため churn 防止)。
         """
         # フェーズは log_key ごとに1回だけ調べる (poll() はシステムコールなので、
@@ -1169,11 +1139,12 @@ class RemoteGui:
             if phase in ("pending", "stopping"):
                 desired = tk.DISABLED
             elif spec.kind == "stop":
-                # GUI が起動したプロセスを畳むボタン。止める相手がいなければ無効。
-                desired = tk.NORMAL if phase == "running" else tk.DISABLED
+                # 孤児の掃除に対応する Stop は、追跡中の相手がいなくても使える。
+                can_stop = phase == "running" or spec.log_key in ORPHAN_KILL_PATTERNS
+                desired = tk.NORMAL if can_stop else tk.DISABLED
             elif spec.role in ("stop", "restart"):
-                # role="stop" の command ("Stop RViz" = `./rviz.bash down`) は GUI 外で
-                # 起動されたものも畳めるので、実行中かどうかによらず常に有効。
+                # stop/restart は GUI が追跡していないプロセス (孤児など) も畳めるので、
+                # 実行中かどうかによらず常に有効。
                 desired = tk.NORMAL
             else:
                 desired = tk.DISABLED if phase != "idle" else tk.NORMAL

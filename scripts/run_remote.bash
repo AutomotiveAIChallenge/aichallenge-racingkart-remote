@@ -4,8 +4,7 @@
 #   run_remote.bash "A2 A3 A7" [LOG_DIR]
 #
 # 起動するのは zenoh ブリッジ・joy・manager の3つ。manager は joy の中継・選択の GUI・
-# レース通知を1つのプロセスで行う。RViz だけは Autoware の RViz プラグインと
-# map_loader が要るのでコンテナのまま (make rviz)。
+# レース通知を1つのプロセスで行う。
 #
 # 起動の前段 (.env / ROS 環境 / ROS_DOMAIN_ID / ログ先) は remote_component.bash が持つ。
 # ここはそれを3回呼ぶだけで、前段を持たない (LN-13)。ランチャ GUI も同じものを1回ずつ
