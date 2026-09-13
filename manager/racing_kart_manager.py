@@ -131,7 +131,8 @@ class RacingKartManagerNode(Node):
         """joy 受信が唯一の publish 契機 (REQ-13)。
 
         タイマーで publish すると、ジョイスティックが死んでも車両には新鮮な joy が
-        届き続け、車両側の5秒の生存チェーンが成立しなくなる。
+        届き続け、遠隔リンクの生死が車両の挙動に化ける。遠隔は冗長系であって、
+        車両のハートビート源にしない (docs/spec/joy-routing.md §7)。
         """
         value = to_core_joy(msg)
 
