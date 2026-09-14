@@ -42,8 +42,8 @@ from racing_kart_manager_core import (
 def test_t07_publishes_to_every_target_vehicle(selection):
     """T-07: joy 1つにつき、対象車両全部へ1つずつ送る (REQ-13)。
 
-    宛先は選択で絞らない。絞ると、送らなくなった車両が5秒後に緊急停止をラッチし、
-    選択し直しても解除操作なしには動かせなくなる。
+    宛先は選択で絞らない。絞ると、選択を切り替えた直後の1フレームが届かず、
+    手元の joy が効き始めるのが遅れる。
     """
     outgoing = transform(JOY_FULL, selection, VEHICLES)
 

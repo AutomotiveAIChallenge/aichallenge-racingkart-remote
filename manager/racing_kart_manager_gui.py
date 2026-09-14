@@ -61,6 +61,9 @@ class ManagerWindow:
             title += f" (brake test {node.brake_test * 100:g}%)"
         self.root.title(title)
         self.root.minsize(480, 200)
+        self.root.geometry("760x520")
+        # 他のウィンドウの裏に隠れて操作できなくなるのを防ぐため、常に最前面に表示する。
+        self.root.attributes("-topmost", True)
 
         frame = tk.Frame(self.root, padx=12, pady=12)
         frame.pack(fill="both", expand=True)

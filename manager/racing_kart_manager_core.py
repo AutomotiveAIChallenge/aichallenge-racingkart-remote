@@ -25,7 +25,16 @@ from typing import Optional
 #: 運用に存在する車両ID。起動引数の検証にだけ使う。
 #: 車両IDの正本は shared/vehicle_ports.sh (本体リポジトリからの複製)。車両を増やすときは
 #: そちらと揃えること。ここから source できないので複製している。
-KNOWN_VEHICLE_IDS: tuple[str, ...] = ("A1", "A2", "A3", "A5", "A6", "A7", "A8")
+KNOWN_VEHICLE_IDS: tuple[str, ...] = (
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7",
+    "A8",
+)
 
 
 def parse_vehicles(args) -> Optional[tuple[str, ...]]:
@@ -166,8 +175,8 @@ def transform(
 ) -> dict[str, JoyValue]:
     """受信した joy を、対象車両ごとにマスクして配る (REQ-13, §4.2)。
 
-    宛先は絞らない。選択が未選択でも全車へ送る。送出を止めた車両は5秒後に
-    緊急停止がラッチし、選択し直しても解除操作なしには動かせなくなる (REQ-14)。
+    宛先は絞らない。選択が未選択でも全車へ送る。選択を切り替えた瞬間から手元の joy が
+    そのまま効くようにするためで、送出の有無で車両側の状態は変わらない (REQ-14)。
     """
     if not vehicles:
         return {}
