@@ -30,7 +30,7 @@ LAUNCHER_PID_FILE = REPO_ROOT / "output" / "gui-launcher.pid"
 REMOTE_PID_FILE = REPO_ROOT / "output" / "remote.pid"
 
 # 遠隔操作の対象にする実車。Zenoh と Manager は複数台をまとめて扱う。
-VEHICLE_IDS = ["A2", "A3", "A6", "A7"]
+VEHICLE_IDS = ["A2", "A3", "A4", "A6", "A7"]
 
 
 # --- 多重起動防止まわりの純粋関数 (Tk に依存しないので pytest から直接叩ける) ---

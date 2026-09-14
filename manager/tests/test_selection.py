@@ -67,7 +67,7 @@ def test_t05_switches_even_while_the_throttle_is_held():
 
 def test_t06a_accepts_a_valid_list_in_order():
     """T-06: 指定した順を保つ。GUI のボタン並びに効く。"""
-    assert parse_vehicles(["A7", "A2", "A3"]) == ("A7", "A2", "A3")
+    assert parse_vehicles(["A7", "A2", "A4"]) == ("A7", "A2", "A4")
 
 
 def test_t06b_rejects_an_empty_list():

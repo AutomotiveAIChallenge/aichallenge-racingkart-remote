@@ -15,8 +15,8 @@
 | Joy | `remote_component.bash joy` | GUIが起動したプロセスと孤児ノードを停止 | 再起動 | Joy Log |
 | Manager | `remote_component.bash manager` | GUIが起動したプロセスを停止 | 再起動 | Manager Log |
 
-Zenoh / Manager の対象車両は `A2 A3 A6 A7` のチェックボックスで複数選択し、既定では
-4台すべてを選択する。Zenoh / Joy / Manager は `REMOTE_COMPONENT_STDIO=1` で
+Zenoh / Manager の対象車両は `A2 A3 A4 A6 A7` のチェックボックスで複数選択し、既定では
+5台すべてを選択する。Zenoh / Joy / Manager は `REMOTE_COMPONENT_STDIO=1` で
 共通起動前段を通し、`.env`、ROS 2、`ROS_DOMAIN_ID=0`、CycloneDDS設定を読み込む。
 出力はファイルへリダイレクトせず、基準実装と同じくGUIのログパイプへ渡す。
 

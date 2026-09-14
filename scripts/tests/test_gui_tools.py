@@ -47,7 +47,7 @@ def test_zenoh_receives_all_selected_vehicles():
 
 
 def test_operational_fleet_is_selected_in_stable_order():
-    assert launcher.VEHICLE_IDS == ["A2", "A3", "A6", "A7"]
+    assert launcher.VEHICLE_IDS == ["A2", "A3", "A4", "A6", "A7"]
 
 
 # --- LN-15: ランチャ GUI と make remote の多重起動防止 ---
