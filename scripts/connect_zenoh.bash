@@ -1,7 +1,7 @@
 #!/bin/bash
 # 遠隔操作PC側の zenoh ブリッジを1台分だけ起動する。
 #
-#   connect_zenoh.bash {A1|A2|A3|A5|A6|A7|A8}
+#   connect_zenoh.bash {A1|A2|A3|A4|A5|A6|A7|A8}
 #   connect_zenoh.bash {test-remote|test-server}
 #
 # 複数台をまとめて起動するときは make remote (compose の zenoh-remote サービス、
@@ -45,7 +45,7 @@ render_config() {
 
 if [ "$#" -ne 1 ]; then
     echo "エラー: Vehicle ID を指定してください。" >&2
-    echo "使用法: $0 {A1|A2|A3|A5|A6|A7|A8|test-remote|test-server}" >&2
+    echo "使用法: $0 {A1|A2|A3|A4|A5|A6|A7|A8|test-remote|test-server}" >&2
     exit 1
 fi
 

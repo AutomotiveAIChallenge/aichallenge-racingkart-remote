@@ -25,7 +25,16 @@ from typing import Optional
 #: 運用に存在する車両ID。起動引数の検証にだけ使う。
 #: 車両IDの正本は shared/vehicle_ports.sh (本体リポジトリからの複製)。車両を増やすときは
 #: そちらと揃えること。ここから source できないので複製している。
-KNOWN_VEHICLE_IDS: tuple[str, ...] = ("A1", "A2", "A3", "A5", "A6", "A7", "A8")
+KNOWN_VEHICLE_IDS: tuple[str, ...] = (
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7",
+    "A8",
+)
 
 
 def parse_vehicles(args) -> Optional[tuple[str, ...]]:

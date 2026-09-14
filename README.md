@@ -153,7 +153,7 @@ make remote VEHICLES="A3" BRAKE_TEST=20
 
 本体リポジトリの `remote/gui_tools.py` と同じGUIに Manager の列とログを加えたものです。
 上部のチェックボックスで Zenoh / Manager の対象車両を複数選択できます（既定は
-`A2 A3 A6 A7`）。Manager と Joy は共通起動前段を通すため、`.env`、ROS 2、
+`A2 A3 A4 A6 A7`）。Manager と Joy は共通起動前段を通すため、`.env`、ROS 2、
 CycloneDDS設定も読み込まれます。
 
 プロセスは専用グループで起動され、停止は SIGTERM から SIGKILL へ段階的に進みます。

@@ -1,7 +1,7 @@
 #!/bin/bash
 # 1台だけ zenoh に繋ぎ直す。
 #
-#   restart.bash {A1|A2|A3|A5|A6|A7|A8|test-*}
+#   restart.bash {A1|A2|A3|A4|A5|A6|A7|A8|test-*}
 #
 # 単車を手で扱うための道具。複数台をまとめて扱うときはGUIか make remoteを使う。
 set -euo pipefail
@@ -10,7 +10,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONNECT_SCRIPT="${SCRIPT_DIR}/connect_zenoh.bash"
 
 usage() {
-    echo "Usage: $0 {A1|A2|A3|A5|A6|A7|A8|test-*}" >&2
+    echo "Usage: $0 {A1|A2|A3|A4|A5|A6|A7|A8|test-*}" >&2
 }
 
 if [ ! -x "${CONNECT_SCRIPT}" ]; then
